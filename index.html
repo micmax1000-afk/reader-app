@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lettore TTS Neural</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; max-width: 600px; margin: auto; background: #f4f6f9; color: #333; }
+    h2 { text-align: center; color: #1a252f; }
+    textarea { width: 100%; height: 180px; padding: 12px; box-sizing: border-box; border-radius: 8px; border: 1px solid #ccc; font-size: 16px; margin-bottom: 12px; resize: vertical; }
+    .controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px; }
+    select, button { padding: 12px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; background: white; }
+    button { background: #0066cc; color: white; border: none; font-weight: bold; cursor: pointer; }
+    button:disabled { background: #999; }
+    #status { margin-top: 10px; font-weight: 500; font-size: 14px; text-align: center; color: #555; }
+    audio { width: 100%; margin-top: 15px; }
+  </style>
+</head>
+<body>
+
+  <h2>Lettore Vocale Neural</h2>
+  <textarea id="textInput" placeholder="Incolla qui il testo da leggere..."></textarea>
+
+  <div class="controls">
+    <select id="voiceSelect">
+      <option value="it-IT-ElianaNeural">Eliana (Italiano - Femminile)</option>
+      <option value="it-IT-DiegoNeural">Diego (Italiano - Maschile)</option>
+      <option value="it-IT-IsabellaNeural">Isabella (Italiano - Espressiva)</option>
+    </select>
+    <button id="playBtn" onclick="processAndPlay()">Leggi Testo</button>
+  </div>
+
+  <div id="status"></div>
+  <audio id="audioPlayer" controls></audio>
+
+  <script>
+    const WORKER_URL = "https://azure-tts-proxy.mic-max-1000.workers.dev";
+
+    function chunkText(text, maxLength = 1500) {
+      const sentences = text.match(/[^.!?]+[.!?]+|\s*$/g) || [text];
+      const chunks = [];
+      let currentChunk = "";
+
+      for (const sentence of sentences) {
+        if ((currentChunk + sentence).length <= maxLength) {
+          currentChunk += sentence;
+        } else {
+          if (currentChunk.trim()) chunks.push(currentChunk.trim());
+          currentChunk = sentence;
+        }
+      }
+      if (currentChunk.trim()) chunks.push(currentChunk.trim());
+      return chunks;
+    }
+
+    async function processAndPlay() {
+      const text = document.getElementById('textInput').value;
+      const voice = document.getElementById('voiceSelect').value;
+      const status = document.getElementById('status');
+      const playBtn = document.getElementById('playBtn');
+      const audioPlayer = document.getElementById('audioPlayer');
+
+      if (!text.trim()) {
+        status.innerText = "Inserisci del testo!";
+        return;
+      }
+
+      playBtn.disabled = true;
+      status.innerText = "Elaborazione in corso...";
+
+      const chunks = chunkText(text);
+      status.innerText = `Testo diviso in ${chunks.length} blocco/i. Generazione audio...`;
+
+      try {
+        const response = await fetch(WORKER_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: chunks[0], voice: voice })
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || "Errore nella richiesta TTS");
+        }
+
+        const blob = await response.blob();
+        const audioUrl = URL.createObjectURL(blob);
+        audioPlayer.src = audioUrl;
+        audioPlayer.play();
+        status.innerText = "Riproduzione in corso...";
+      } catch (e) {
+        status.innerText = "Errore: " + e.message;
+      } finally {
+        playBtn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>

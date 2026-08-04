@@ -17,7 +17,7 @@
     select, button { padding: 12px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; background: white; }
     button { background: #28a745; color: white; border: none; font-weight: bold; cursor: pointer; }
     button:disabled { background: #999; }
-    #status { margin-top: 10px; font-weight: bold; font-size: 14px; text-align: center; word-break: break-all; padding: 10px; border-radius: 6px; display: none; }
+    #status { margin-top: 10px; font-weight: bold; font-size: 14px; text-align: center; word-break: break-all; padding: 10px; border-radius: 6px; display: none; border: 1px solid transparent; }
     audio { width: 100%; margin-top: 15px; }
   </style>
 </head>
@@ -48,13 +48,12 @@
   <audio id="audioPlayer" controls></audio>
 
   <script>
-    // URL del tuo Worker Cloudflare (pulito, senza barra finale)
     const WORKER_URL = "https://azure-tts-proxy.mic-max-1000.workers.dev";
 
     function showStatus(msg, isError = false) {
       const status = document.getElementById('status');
       status.style.display = 'block';
-      status.style.color = isError ? '#d9534f' : '#28a745';
+      status.style.color = isError ? '#d9534f' : '#155724';
       status.style.backgroundColor = isError ? '#fff3f3' : '#e8f8f0';
       status.style.borderColor = isError ? '#f5c6cb' : '#b7e1cd';
       status.innerText = msg;
@@ -78,9 +77,10 @@
 
           let fullText = "";
           const spine = book.spine;
+
           for (const item of spine.spineItems) {
             const doc = await item.load(book.load.bind(book));
-            const text = doc.textContent || doc.body.innerText || "";
+            const text = doc.textContent || (doc.body && doc.body.innerText) || "";
             if (text.trim()) {
               fullText += text.trim() + "\n\n";
             }
@@ -129,13 +129,16 @@
       const chunks = chunkText(text);
 
       try {
-        // Pulisce l'URL rimuovendo la barra finale se presente
         const cleanUrl = WORKER_URL.replace(/\/$/, "");
 
+        // Per ora inviamo solo il primo chunk
         const response = await fetch(cleanUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: chunks[0], voice: voice })
+          headers: {
+            "Content-Type": "text/plain",
+            "X-Voice": voice
+          },
+          body: chunks[0]
         });
 
         if (!response.ok) {
@@ -146,7 +149,7 @@
         const blob = await response.blob();
         const audioUrl = URL.createObjectURL(blob);
         audioPlayer.src = audioUrl;
-        audioPlayer.play();
+        await audioPlayer.play();
         showStatus("Riproduzione avviata!", false);
       } catch (e) {
         showStatus("Errore: " + e.message, true);

@@ -18,6 +18,7 @@
     button { background: #28a745; color: white; border: none; font-weight: bold; cursor: pointer; }
     button:disabled { background: #999; }
     #status { margin-top: 10px; font-weight: bold; font-size: 14px; text-align: center; word-break: break-all; padding: 10px; border-radius: 6px; display: none; border: 1px solid transparent; }
+    #progress { margin-top: 6px; font-size: 13px; text-align: center; color: #555; display: none; }
     audio { width: 100%; margin-top: 15px; }
   </style>
 </head>
@@ -42,13 +43,19 @@
       <option value="it-IT-IsabellaNeural">Isabella (Italiano - Espressiva)</option>
     </select>
     <button id="playBtn" onclick="processAndPlay()">Leggi Testo</button>
+    <button id="stopBtn" onclick="stopPlayback()" style="background:#d9534f;">Ferma</button>
   </div>
 
   <div id="status"></div>
+  <div id="progress"></div>
   <audio id="audioPlayer" controls></audio>
 
   <script>
     const WORKER_URL = "https://azure-tts-proxy.mic-max-1000.workers.dev";
+
+    let currentChunks = [];
+    let currentIndex = 0;
+    let playbackToken = 0; // per poter interrompere in sicurezza
 
     function showStatus(msg, isError = false) {
       const status = document.getElementById('status');
@@ -57,6 +64,12 @@
       status.style.backgroundColor = isError ? '#fff3f3' : '#e8f8f0';
       status.style.borderColor = isError ? '#f5c6cb' : '#b7e1cd';
       status.innerText = msg;
+    }
+
+    function showProgress(msg) {
+      const p = document.getElementById('progress');
+      p.style.display = 'block';
+      p.innerText = msg;
     }
 
     async function loadEpub(event) {
@@ -112,6 +125,26 @@
       return chunks;
     }
 
+    async function fetchChunkAudio(chunkText, voice) {
+      const cleanUrl = WORKER_URL.replace(/\/$/, "");
+      const response = await fetch(cleanUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain",
+          "X-Voice": voice
+        },
+        body: chunkText
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errText}`);
+      }
+
+      const blob = await response.blob();
+      return URL.createObjectURL(blob);
+    }
+
     async function processAndPlay() {
       const text = document.getElementById('textInput').value;
       const voice = document.getElementById('voiceSelect').value;
@@ -123,39 +156,60 @@
         return;
       }
 
+      currentChunks = chunkText(text);
+      currentIndex = 0;
+      playbackToken++;
+      const myToken = playbackToken;
+
       playBtn.disabled = true;
       showStatus("Generazione audio in corso...", false);
 
-      const chunks = chunkText(text);
+      await playFrom(myToken, voice);
+    }
 
-      try {
-        const cleanUrl = WORKER_URL.replace(/\/$/, "");
+    async function playFrom(myToken, voice) {
+      const playBtn = document.getElementById('playBtn');
+      const audioPlayer = document.getElementById('audioPlayer');
 
-        // Per ora inviamo solo il primo chunk
-        const response = await fetch(cleanUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "text/plain",
-            "X-Voice": voice
-          },
-          body: chunks[0]
-        });
+      while (currentIndex < currentChunks.length) {
+        if (myToken !== playbackToken) return; // interrotto da stopPlayback
 
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(`HTTP ${response.status}: ${errText}`);
+        showProgress(`Parte ${currentIndex + 1} di ${currentChunks.length}`);
+
+        try {
+          const audioUrl = await fetchChunkAudio(currentChunks[currentIndex], voice);
+          if (myToken !== playbackToken) return;
+
+          audioPlayer.src = audioUrl;
+          showStatus("Riproduzione avviata!", false);
+
+          await new Promise((resolve, reject) => {
+            audioPlayer.onended = resolve;
+            audioPlayer.onerror = () => reject(new Error("Errore riproduzione audio"));
+            audioPlayer.play().catch(reject);
+          });
+
+          if (myToken !== playbackToken) return;
+          currentIndex++;
+        } catch (e) {
+          showStatus("Errore: " + e.message, true);
+          break;
         }
-
-        const blob = await response.blob();
-        const audioUrl = URL.createObjectURL(blob);
-        audioPlayer.src = audioUrl;
-        await audioPlayer.play();
-        showStatus("Riproduzione avviata!", false);
-      } catch (e) {
-        showStatus("Errore: " + e.message, true);
-      } finally {
-        playBtn.disabled = false;
       }
+
+      if (myToken === playbackToken && currentIndex >= currentChunks.length) {
+        showStatus("Lettura completata!", false);
+        document.getElementById('progress').style.display = 'none';
+      }
+      playBtn.disabled = false;
+    }
+
+    function stopPlayback() {
+      playbackToken++; // invalida il ciclo in corso
+      const audioPlayer = document.getElementById('audioPlayer');
+      audioPlayer.pause();
+      document.getElementById('playBtn').disabled = false;
+      showStatus("Riproduzione interrotta.", false);
     }
   </script>
 </body>

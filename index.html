@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lettore TTS Neural & ePub</title>
+  <title>Lettore Vocal TTS & ePub</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
   <style>
@@ -48,9 +48,7 @@
   <audio id="audioPlayer" controls></audio>
 
   <script>
-    // INSERISCI QUI LA TUA CHIAVE 1 DI AZURE (Recuperala da Azure Portal)
-    const AZURE_KEY = "FylrfBPVJWsi3c1NqW0C7pIVgagD9QhI4XQDbn1xVQAp0v8cQv6sJQQJ99CHACgEuAYXJ3w3AAAYACOGJwXi";
-    const AZURE_REGION = "italynorth";
+    const WORKER_URL = "https://azure-tts-proxy.mic-max-1000.workers.dev";
 
     async function loadEpub(event) {
       const file = event.target.files[0];
@@ -118,37 +116,20 @@
       }
 
       playBtn.disabled = true;
-      status.innerText = "Connessione ad Azure...";
+      status.innerText = "Invio richiesta al Worker...";
 
       const chunks = chunkText(text);
 
-      const safeText = chunks[0]
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&apos;")
-        .replace(/«/g, "&quot;")
-        .replace(/»/g, "&quot;");
-
-      const ssml = `<speak version='1.0' xml:lang='it-IT'><voice name='${voice}'><prosody rate='0%'>${safeText}</prosody></voice></speak>`;
-
-      const url = `https://${AZURE_REGION}.tts.speech.microsoft.com/cognitiveservices/v1`;
-
       try {
-        const response = await fetch(url, {
+        const response = await fetch(WORKER_URL, {
           method: "POST",
-          headers: {
-            "Ocp-Apim-Subscription-Key": AZURE_KEY,
-            "Content-Type": "application/ssml+xml",
-            "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3"
-          },
-          body: ssml
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: chunks[0], voice: voice })
         });
 
         if (!response.ok) {
-          const errBody = await response.text();
-          throw new Error(`Azure Error ${response.status}: ${errBody}`);
+          const errData = await response.text();
+          throw new Error(`Errore Worker HTTP ${response.status}: ${errData}`);
         }
 
         const blob = await response.blob();

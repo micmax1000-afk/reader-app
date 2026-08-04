@@ -1,151 +1,80 @@
-<!DOCTYPE html>
-<html lang="it">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lettore TTS Neural & ePub</title>
-  <!-- JSZip e epub.js per la lettura dei file ePub -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; max-width: 650px; margin: auto; background: #f4f6f9; color: #333; }
-    h2 { text-align: center; color: #1a252f; margin-bottom: 15px; }
-    .file-input-container { margin-bottom: 15px; background: #fff; padding: 12px; border-radius: 8px; border: 1px dashed #0066cc; text-align: center; }
-    input[type="file"] { display: none; }
-    .custom-file-upload { display: inline-block; padding: 8px 16px; background: #0066cc; color: white; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; }
-    textarea { width: 100%; height: 200px; padding: 12px; box-sizing: border-box; border-radius: 8px; border: 1px solid #ccc; font-size: 16px; margin-bottom: 12px; resize: vertical; }
-    .controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px; }
-    select, button { padding: 12px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; background: white; }
-    button { background: #28a745; color: white; border: none; font-weight: bold; cursor: pointer; }
-    button:disabled { background: #999; }
-    #status { margin-top: 10px; font-weight: 500; font-size: 14px; text-align: center; color: #555; }
-    audio { width: 100%; margin-top: 15px; }
-  </style>
-</head>
-<body>
+export default {
+  async fetch(request, env) {
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    };
 
-  <h2>Lettore Vocale TTS & ePub</h2>
-
-  <!-- Caricamento file ePub -->
-  <div class="file-input-container">
-    <label for="filePicker" class="custom-file-upload">
-      📁 Carica un libro (.ePub)
-    </label>
-    <input type="file" id="filePicker" accept=".epub" onchange="loadEpub(event)">
-    <div id="fileName" style="font-size: 12px; margin-top: 5px; color: #666;">Oppure incolla direttamente il testo sotto</div>
-  </div>
-
-  <textarea id="textInput" placeholder="Incolla qui il testo o carica un file .ePub..."></textarea>
-
-  <div class="controls">
-    <select id="voiceSelect">
-      <option value="it-IT-ElianaNeural">Eliana (Italiano - Femminile)</option>
-      <option value="it-IT-DiegoNeural">Diego (Italiano - Maschile)</option>
-      <option value="it-IT-IsabellaNeural">Isabella (Italiano - Espressiva)</option>
-    </select>
-    <button id="playBtn" onclick="processAndPlay()">Leggi Testo</button>
-  </div>
-
-  <div id="status"></div>
-  <audio id="audioPlayer" controls></audio>
-
-  <script>
-    const WORKER_URL = "https://azure-tts-proxy.mic-max-1000.workers.dev";
-
-    // Funzione per estrarre il testo da un file ePub
-    async function loadEpub(event) {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      const status = document.getElementById('status');
-      const textInput = document.getElementById('textInput');
-      document.getElementById('fileName').innerText = "File caricato: " + file.name;
-
-      status.innerText = "Estrazione testo dal file ePub in corso...";
-      textInput.value = "";
-
-      try {
-        const reader = new FileReader();
-        reader.onload = async function(e) {
-          const book = ePub(e.target.result);
-          await book.ready;
-
-          let fullText = "";
-          // Scorri i capitoli dell'ePub ed estrai il testo
-          const spine = book.spine;
-          for (const item of spine.spineItems) {
-            const doc = await item.load(book.load.bind(book));
-            const text = doc.textContent || doc.body.innerText || "";
-            fullText += text.trim() + "\n\n";
-          }
-
-          textInput.value = fullText;
-          status.innerText = "ePub caricato con successo! Premi 'Leggi Testo'.";
-        };
-        reader.readAsArrayBuffer(file);
-      } catch (err) {
-        status.innerText = "Errore durante la lettura dell'ePub: " + err.message;
-      }
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders, status: 204 });
     }
 
-    function chunkText(text, maxLength = 1500) {
-      const sentences = text.match(/[^.!?]+[.!?]+|\s*$/g) || [text];
-      const chunks = [];
-      let currentChunk = "";
-
-      for (const sentence of sentences) {
-        if ((currentChunk + sentence).length <= maxLength) {
-          currentChunk += sentence;
-        } else {
-          if (currentChunk.trim()) chunks.push(currentChunk.trim());
-          currentChunk = sentence;
-        }
-      }
-      if (currentChunk.trim()) chunks.push(currentChunk.trim());
-      return chunks;
+    if (request.method !== "POST") {
+      return new Response("Metodo non consentito", { status: 405, headers: corsHeaders });
     }
 
-    async function processAndPlay() {
-      const text = document.getElementById('textInput').value;
-      const voice = document.getElementById('voiceSelect').value;
-      const status = document.getElementById('status');
-      const playBtn = document.getElementById('playBtn');
-      const audioPlayer = document.getElementById('audioPlayer');
+    try {
+      const body = await request.json();
+      const { text, voice = "it-IT-ElianaNeural", rate = "0%" } = body;
 
-      if (!text.trim()) {
-        status.innerText = "Inserisci del testo o carica un file ePub!";
-        return;
-      }
-
-      playBtn.disabled = true;
-      status.innerText = "Elaborazione in corso...";
-
-      const chunks = chunkText(text);
-      status.innerText = `Generazione audio (1/` + chunks.length + `)...`;
-
-      try {
-        const response = await fetch(WORKER_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: chunks[0], voice: voice })
+      if (!text || text.trim().length === 0) {
+        return new Response(JSON.stringify({ error: "Testo mancante" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
-
-        if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.error || "Errore nella richiesta TTS");
-        }
-
-        const blob = await response.blob();
-        const audioUrl = URL.createObjectURL(blob);
-        audioPlayer.src = audioUrl;
-        audioPlayer.play();
-        status.innerText = "Riproduzione in corso...";
-      } catch (e) {
-        status.innerText = "Errore: " + e.message;
-      } finally {
-        playBtn.disabled = false;
       }
+
+      // Sanitizzazione caratteri per SSML / XML
+      const safeText = text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;")
+        .replace(/«/g, "&quot;")
+        .replace(/»/g, "&quot;");
+
+      const ssml = `<speak version='1.0' xml:lang='it-IT'><voice name='${voice}'><prosody rate='${rate}'>${safeText}</prosody></voice></speak>`;
+
+      const azureKey = env.AZURE_SPEECH_KEY;
+      const azureRegion = env.AZURE_SPEECH_REGION || "italynorth";
+
+      const azureUrl = `https://${azureRegion}.tts.speech.microsoft.com/cognitiveservices/v1`;
+
+      const response = await fetch(azureUrl, {
+        method: "POST",
+        headers: {
+          "Ocp-Apim-Subscription-Key": azureKey,
+          "Content-Type": "application/ssml+xml",
+          "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3",
+          "User-Agent": "CloudflareWorker-TTS"
+        },
+        body: ssml
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        return new Response(JSON.stringify({ error: `Azure ${response.status}: ${errText}` }), {
+          status: response.status,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+
+      const audioBuffer = await response.arrayBuffer();
+      return new Response(audioBuffer, {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "audio/mpeg",
+          "Cache-Control": "public, max-age=86400"
+        }
+      });
+
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
     }
-  </script>
-</body>
-</html>
+  }
+};

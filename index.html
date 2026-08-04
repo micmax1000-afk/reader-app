@@ -17,7 +17,7 @@
     select, button { padding: 12px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; background: white; }
     button { background: #28a745; color: white; border: none; font-weight: bold; cursor: pointer; }
     button:disabled { background: #999; }
-    #status { margin-top: 10px; font-weight: bold; font-size: 14px; text-align: center; color: #d9534f; word-break: break-all; background: #fff3f3; padding: 10px; border-radius: 6px; border: 1px solid #f5c6cb; display: none; }
+    #status { margin-top: 10px; font-weight: bold; font-size: 14px; text-align: center; word-break: break-all; padding: 10px; border-radius: 6px; display: none; }
     audio { width: 100%; margin-top: 15px; }
   </style>
 </head>
@@ -48,9 +48,10 @@
   <audio id="audioPlayer" controls></audio>
 
   <script>
+    // URL del tuo Worker Cloudflare (pulito, senza barra finale)
     const WORKER_URL = "https://azure-tts-proxy.mic-max-1000.workers.dev";
 
-    function showStatus(msg, isError = true) {
+    function showStatus(msg, isError = false) {
       const status = document.getElementById('status');
       status.style.display = 'block';
       status.style.color = isError ? '#d9534f' : '#28a745';
@@ -86,11 +87,11 @@
           }
 
           textInput.value = fullText;
-          showStatus("ePub pronto! Premi 'Leggi Testo'.", false);
+          showStatus("ePub caricato con successo! Premi 'Leggi Testo'.", false);
         };
         reader.readAsArrayBuffer(file);
       } catch (err) {
-        showStatus("Errore lettura ePub: " + err.message, true);
+        showStatus("Errore ePub: " + err.message, true);
       }
     }
 
@@ -118,17 +119,20 @@
       const audioPlayer = document.getElementById('audioPlayer');
 
       if (!text.trim()) {
-        showStatus("Inserisci un testo prima di continuare!", true);
+        showStatus("Inserisci o carica un testo!", true);
         return;
       }
 
       playBtn.disabled = true;
-      showStatus("Connessione in corso al server proxy...", false);
+      showStatus("Generazione audio in corso...", false);
 
       const chunks = chunkText(text);
 
       try {
-        const response = await fetch(WORKER_URL, {
+        // Pulisce l'URL rimuovendo la barra finale se presente
+        const cleanUrl = WORKER_URL.replace(/\/$/, "");
+
+        const response = await fetch(cleanUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: chunks[0], voice: voice })
@@ -136,16 +140,16 @@
 
         if (!response.ok) {
           const errText = await response.text();
-          throw new Error(`Risposta HTTP ${response.status}: ${errText}`);
+          throw new Error(`HTTP ${response.status}: ${errText}`);
         }
 
         const blob = await response.blob();
         const audioUrl = URL.createObjectURL(blob);
         audioPlayer.src = audioUrl;
         audioPlayer.play();
-        showStatus("Riproduzione audio avviata!", false);
+        showStatus("Riproduzione avviata!", false);
       } catch (e) {
-        showStatus("Dettaglio Errore: " + e.message, true);
+        showStatus("Errore: " + e.message, true);
       } finally {
         playBtn.disabled = false;
       }

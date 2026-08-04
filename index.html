@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lettore Vocal TTS & ePub</title>
+  <title>Lettore TTS Neural & ePub</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
   <style>
@@ -17,7 +17,7 @@
     select, button { padding: 12px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; background: white; }
     button { background: #28a745; color: white; border: none; font-weight: bold; cursor: pointer; }
     button:disabled { background: #999; }
-    #status { margin-top: 10px; font-weight: 500; font-size: 14px; text-align: center; color: #555; word-break: break-all; }
+    #status { margin-top: 10px; font-weight: bold; font-size: 14px; text-align: center; color: #d9534f; word-break: break-all; background: #fff3f3; padding: 10px; border-radius: 6px; border: 1px solid #f5c6cb; display: none; }
     audio { width: 100%; margin-top: 15px; }
   </style>
 </head>
@@ -50,15 +50,23 @@
   <script>
     const WORKER_URL = "https://azure-tts-proxy.mic-max-1000.workers.dev";
 
+    function showStatus(msg, isError = true) {
+      const status = document.getElementById('status');
+      status.style.display = 'block';
+      status.style.color = isError ? '#d9534f' : '#28a745';
+      status.style.backgroundColor = isError ? '#fff3f3' : '#e8f8f0';
+      status.style.borderColor = isError ? '#f5c6cb' : '#b7e1cd';
+      status.innerText = msg;
+    }
+
     async function loadEpub(event) {
       const file = event.target.files[0];
       if (!file) return;
 
-      const status = document.getElementById('status');
       const textInput = document.getElementById('textInput');
       document.getElementById('fileName').innerText = "File caricato: " + file.name;
 
-      status.innerText = "Estrazione testo dal libro...";
+      showStatus("Estrazione testo dal libro in corso...", false);
       textInput.value = "";
 
       try {
@@ -78,15 +86,15 @@
           }
 
           textInput.value = fullText;
-          status.innerText = "ePub pronto! Premi 'Leggi Testo'.";
+          showStatus("ePub pronto! Premi 'Leggi Testo'.", false);
         };
         reader.readAsArrayBuffer(file);
       } catch (err) {
-        status.innerText = "Errore ePub: " + err.message;
+        showStatus("Errore lettura ePub: " + err.message, true);
       }
     }
 
-    function chunkText(text, maxLength = 1000) {
+    function chunkText(text, maxLength = 800) {
       const sentences = text.match(/[^.!?]+[.!?]+|\s*$/g) || [text];
       const chunks = [];
       let currentChunk = "";
@@ -106,17 +114,16 @@
     async function processAndPlay() {
       const text = document.getElementById('textInput').value;
       const voice = document.getElementById('voiceSelect').value;
-      const status = document.getElementById('status');
       const playBtn = document.getElementById('playBtn');
       const audioPlayer = document.getElementById('audioPlayer');
 
       if (!text.trim()) {
-        status.innerText = "Inserisci del testo!";
+        showStatus("Inserisci un testo prima di continuare!", true);
         return;
       }
 
       playBtn.disabled = true;
-      status.innerText = "Invio richiesta al Worker...";
+      showStatus("Connessione in corso al server proxy...", false);
 
       const chunks = chunkText(text);
 
@@ -128,18 +135,17 @@
         });
 
         if (!response.ok) {
-          const errData = await response.text();
-          throw new Error(`Errore Worker HTTP ${response.status}: ${errData}`);
+          const errText = await response.text();
+          throw new Error(`Risposta HTTP ${response.status}: ${errText}`);
         }
 
         const blob = await response.blob();
         const audioUrl = URL.createObjectURL(blob);
         audioPlayer.src = audioUrl;
         audioPlayer.play();
-        status.innerText = "Riproduzione avviata!";
+        showStatus("Riproduzione audio avviata!", false);
       } catch (e) {
-        console.error(e);
-        status.innerText = "Errore: " + e.message;
+        showStatus("Dettaglio Errore: " + e.message, true);
       } finally {
         playBtn.disabled = false;
       }

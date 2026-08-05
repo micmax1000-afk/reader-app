@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -20,6 +21,28 @@
     #status { margin-top: 10px; font-weight: bold; font-size: 14px; text-align: center; word-break: break-all; padding: 10px; border-radius: 6px; display: none; border: 1px solid transparent; }
     #progress { margin-top: 6px; font-size: 13px; text-align: center; color: #555; display: none; }
     audio { width: 100%; margin-top: 15px; }
+
+    #libraryContainer { display: none; margin-bottom: 15px; background: #fff; border-radius: 8px; padding: 12px; border: 1px solid #ddd; }
+    #libraryContainer .library-title { font-weight: bold; margin-bottom: 6px; font-size: 14px; }
+    .library-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 13px; }
+    .library-item:last-child { border-bottom: none; }
+    .library-item button { width: auto; padding: 4px 8px; font-size: 11px; background: #d9534f; }
+
+    .reading-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .reading-toolbar button { flex: 0 0 auto; padding: 8px 10px; font-size: 13px; width: auto; }
+    .reading-toolbar-secondary { display: flex; gap: 6px; margin-bottom: 10px; }
+    .reading-toolbar-secondary button { flex: 0 0 auto; padding: 6px 10px; font-size: 13px; width: auto; background: #6c757d; }
+
+    #bookmarkBanner { display: none; align-items: center; justify-content: space-between; gap: 8px; background: #fff3cd; border: 1px solid #ffe08a; color: #7a5b00; padding: 8px 10px; border-radius: 6px; font-size: 13px; margin-bottom: 10px; }
+    #bookmarkBanner button { padding: 6px 10px; font-size: 12px; width: auto; background: #7a5b00; }
+
+    #chapterNav { display: none; gap: 6px; overflow-x: auto; margin-bottom: 10px; padding-bottom: 4px; }
+    #chapterNav button { flex: 0 0 auto; padding: 6px 10px; font-size: 12px; background: #eee; color: #333; border: 1px solid #ccc; white-space: nowrap; width: auto; }
+
+    #readingView { display: none; }
+    #readingContent { background: #fffdf7; color: #333; border: 1px solid #e0d9c5; border-radius: 10px; padding: 20px; margin-bottom: 15px; font-family: Georgia, 'Times New Roman', serif; font-size: 18px; line-height: 1.7; text-align: justify; max-height: 60vh; overflow-y: auto; box-shadow: 0 1px 4px rgba(0,0,0,0.08); scroll-behavior: smooth; }
+    #readingContent p { margin: 0 0 1em 0; }
+    #readingContent h3 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; color: #888; margin: 1.2em 0 0.6em 0; }
   </style>
 </head>
 <body>
@@ -34,13 +57,49 @@
     <div id="fileName" style="font-size: 12px; margin-top: 5px; color: #666;">Oppure incolla direttamente il testo sotto</div>
   </div>
 
+  <div id="libraryContainer">
+    <div class="library-title">📚 Libri recenti</div>
+    <div id="libraryList"></div>
+  </div>
+
   <textarea id="textInput" placeholder="Incolla qui il testo o carica un file .ePub..."></textarea>
 
+  <div id="readingView">
+    <div class="reading-toolbar">
+      <button onclick="saveBookmark(false)">🔖 Segna pagina</button>
+      <button onclick="showTextEditor()">✏️ Modifica testo</button>
+    </div>
+    <div class="reading-toolbar-secondary">
+      <button onclick="changeFontSize(-2)">A-</button>
+      <button onclick="changeFontSize(2)">A+</button>
+      <button onclick="toggleNightMode()">🌙 Notte</button>
+      <button onclick="downloadMp3()">⬇️ Scarica MP3</button>
+    </div>
+    <div id="bookmarkBanner">
+      <span>Hai un segnalibro salvato per questo libro.</span>
+      <button onclick="goToBookmark()">Vai al segnalibro</button>
+    </div>
+    <div id="chapterNav"></div>
+    <div id="readingContent"></div>
+  </div>
+
   <div class="controls">
+    <button id="genReadingBtn" onclick="startReadingFromTextarea()" style="background:#0066cc;">📖 Vista lettura</button>
+    <select id="engineSelect" onchange="onEngineChange()">
+      <option value="azure">Voce Azure (neurale, a consumo)</option>
+      <option value="browser">Voce del browser (gratis, illimitata)</option>
+    </select>
     <select id="voiceSelect">
       <option value="it-IT-DiegoNeural">Diego (Italiano - Maschile)</option>
       <option value="it-IT-ElianaNeural">Eliana (Italiano - Femminile)</option>
       <option value="it-IT-IsabellaNeural">Isabella (Italiano - Espressiva)</option>
+    </select>
+    <select id="browserVoiceSelect" style="display:none;"></select>
+    <select id="rateSelect">
+      <option value="0%">Velocità: Normale</option>
+      <option value="-25%">Velocità: Lenta</option>
+      <option value="+20%">Velocità: Veloce</option>
+      <option value="+40%">Velocità: Molto veloce</option>
     </select>
     <button id="playBtn" onclick="processAndPlay()">Leggi Testo</button>
     <button id="stopBtn" onclick="stopPlayback()" style="background:#d9534f;">Ferma</button>
@@ -48,14 +107,21 @@
 
   <div id="status"></div>
   <div id="progress"></div>
+  <div id="usageCounter" style="margin-top: 8px; font-size: 13px; text-align: center; color: #555;"></div>
   <audio id="audioPlayer" controls></audio>
 
   <script>
     const WORKER_URL = "https://azure-tts-proxy.mic-max-1000.workers.dev";
+    const APP_TOKEN = "METTI_QUI_LO_STESSO_TOKEN_DEL_WORKER";
 
     let currentChunks = [];
     let currentIndex = 0;
     let playbackToken = 0; // per poter interrompere in sicurezza
+    let prefetchCache = {}; // index -> Promise<{url, blob}>
+    let chunkBlobs = []; // index -> Blob, per il download MP3
+
+    let currentBookId = null;
+    let currentBookTitle = null;
 
     function showStatus(msg, isError = false) {
       const status = document.getElementById('status');
@@ -72,6 +138,278 @@
       p.innerText = msg;
     }
 
+    // --- Contatore caratteri gratuiti (stima locale, per browser) ---
+    const FREE_MONTHLY_LIMIT = 500000;
+
+    function currentMonthKey() {
+      const now = new Date();
+      return `tts_usage_${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    function getUsedCharacters() {
+      const key = currentMonthKey();
+      return parseInt(localStorage.getItem(key) || "0", 10);
+    }
+
+    function addUsedCharacters(count) {
+      const key = currentMonthKey();
+      const updated = getUsedCharacters() + count;
+      localStorage.setItem(key, String(updated));
+      cleanupOldMonths(key);
+      renderUsageCounter();
+    }
+
+    function cleanupOldMonths(currentKey) {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("tts_usage_") && k !== currentKey) {
+          localStorage.removeItem(k);
+        }
+      }
+    }
+
+    function renderUsageCounter() {
+      const used = getUsedCharacters();
+      const remaining = Math.max(0, FREE_MONTHLY_LIMIT - used);
+      const el = document.getElementById('usageCounter');
+      el.innerText = `Caratteri usati questo mese (stima locale): ${used.toLocaleString('it-IT')} / ${FREE_MONTHLY_LIMIT.toLocaleString('it-IT')} — restano circa ${remaining.toLocaleString('it-IT')} gratuiti`;
+    }
+
+    // --- Vista lettura, segnalibro, capitoli, font/notte ---
+    let autoSaveTimer = null;
+    let readingPrefs = JSON.parse(localStorage.getItem('tts_reading_prefs') || '{"fontSize":18,"night":false}');
+
+    function simpleHash(str) {
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        hash = (hash << 5) - hash + str.charCodeAt(i);
+        hash |= 0;
+      }
+      return Math.abs(hash).toString(36);
+    }
+
+    function getBookId(text) {
+      return simpleHash(text.slice(0, 300) + "|" + text.length);
+    }
+
+    // --- Motore Web Speech (gratis, illimitato, voci del dispositivo) ---
+    function onEngineChange() {
+      const engine = document.getElementById('engineSelect').value;
+      document.getElementById('voiceSelect').style.display = engine === 'azure' ? 'block' : 'none';
+      document.getElementById('browserVoiceSelect').style.display = engine === 'browser' ? 'block' : 'none';
+      if (engine === 'browser') populateBrowserVoices();
+    }
+
+    function populateBrowserVoices() {
+      if (!('speechSynthesis' in window)) return;
+      const sel = document.getElementById('browserVoiceSelect');
+      const voices = speechSynthesis.getVoices();
+      if (!voices.length) return; // arriveranno con l'evento voiceschanged
+      const itVoices = voices.filter(v => v.lang && v.lang.toLowerCase().startsWith('it'));
+      const list = itVoices.length ? itVoices : voices;
+      sel.innerHTML = list.map((v, i) => `<option value="${i}">${escapeHtml(v.name)} (${v.lang})</option>`).join('');
+      sel._voiceList = list;
+    }
+
+    function getSelectedBrowserVoice() {
+      const sel = document.getElementById('browserVoiceSelect');
+      if (!sel._voiceList) return null;
+      const idx = parseInt(sel.value, 10);
+      return sel._voiceList[idx] || null;
+    }
+
+    function rateToMultiplier(rateStr) {
+      const map = { "-25%": 0.75, "0%": 1.0, "+20%": 1.2, "+40%": 1.4 };
+      return map[rateStr] || 1.0;
+    }
+
+    function speakChunkBrowser(text, voice, rateMultiplier) {
+      return new Promise((resolve, reject) => {
+        const utter = new SpeechSynthesisUtterance(text);
+        if (voice) utter.voice = voice;
+        utter.rate = rateMultiplier;
+        utter.onend = resolve;
+        utter.onerror = (e) => reject(new Error("Errore voce browser: " + (e.error || 'sconosciuto')));
+        speechSynthesis.speak(utter);
+      });
+    }
+
+    if ('speechSynthesis' in window) {
+      speechSynthesis.onvoiceschanged = populateBrowserVoices;
+      populateBrowserVoices();
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function applyReadingPrefs() {
+      const content = document.getElementById('readingContent');
+      content.style.fontSize = readingPrefs.fontSize + 'px';
+      if (readingPrefs.night) {
+        content.style.background = '#1b1b1b';
+        content.style.color = '#e0e0e0';
+        content.style.borderColor = '#333';
+      } else {
+        content.style.background = '#fffdf7';
+        content.style.color = '#333';
+        content.style.borderColor = '#e0d9c5';
+      }
+    }
+
+    function changeFontSize(delta) {
+      readingPrefs.fontSize = Math.min(28, Math.max(14, readingPrefs.fontSize + delta));
+      localStorage.setItem('tts_reading_prefs', JSON.stringify(readingPrefs));
+      applyReadingPrefs();
+    }
+
+    function toggleNightMode() {
+      readingPrefs.night = !readingPrefs.night;
+      localStorage.setItem('tts_reading_prefs', JSON.stringify(readingPrefs));
+      applyReadingPrefs();
+    }
+
+    function startReadingFromTextarea() {
+      const text = document.getElementById('textInput').value;
+      const title = text.trim().slice(0, 40) || 'Testo senza titolo';
+      renderReadingView(text, null, title);
+    }
+
+    function renderReadingView(text, chapters, title) {
+      if (!text || !text.trim()) {
+        showStatus("Inserisci o carica un testo prima!", true);
+        return;
+      }
+
+      const content = document.getElementById('readingContent');
+      const navContainer = document.getElementById('chapterNav');
+
+      if (chapters && chapters.length > 1) {
+        navContainer.style.display = 'flex';
+        navContainer.innerHTML = chapters.map((c, i) => `<button onclick="scrollToChapter(${i})">${escapeHtml(c.label)}</button>`).join('');
+        content.innerHTML = chapters.map((c, i) => {
+          const paragraphs = c.text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+          return `<div id="chapter-${i}"><h3>${escapeHtml(c.label)}</h3>` + paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('') + `</div>`;
+        }).join('');
+      } else {
+        navContainer.style.display = 'none';
+        navContainer.innerHTML = '';
+        const paragraphs = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+        content.innerHTML = paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('');
+      }
+
+      currentBookId = getBookId(text);
+      currentBookTitle = title || 'Senza titolo';
+      currentChunks = chunkText(text);
+
+      document.getElementById('textInput').style.display = 'none';
+      document.getElementById('readingView').style.display = 'block';
+      document.getElementById('genReadingBtn').style.display = 'none';
+
+      applyReadingPrefs();
+      checkBookmark();
+
+      const savedIndex = parseInt(localStorage.getItem(getProgressKey(currentBookId)) || "0", 10);
+      const progressPercent = currentChunks.length ? Math.round(savedIndex / currentChunks.length * 100) : 0;
+      updateLibrary(currentBookId, currentBookTitle, progressPercent);
+
+      content.onscroll = () => {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = setTimeout(() => saveBookmark(true), 800);
+      };
+    }
+
+    function scrollToChapter(i) {
+      const el = document.getElementById('chapter-' + i);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function showTextEditor() {
+      document.getElementById('textInput').style.display = 'block';
+      document.getElementById('readingView').style.display = 'none';
+      document.getElementById('genReadingBtn').style.display = 'inline-block';
+    }
+
+    function bookmarkKey() {
+      return `tts_bookmark_${currentBookId}`;
+    }
+
+    function saveBookmark(silent) {
+      if (!currentBookId) return;
+      const content = document.getElementById('readingContent');
+      const data = { scrollTop: content.scrollTop, savedAt: Date.now() };
+      localStorage.setItem(bookmarkKey(), JSON.stringify(data));
+      if (!silent) showStatus("Segnalibro salvato! 🔖", false);
+    }
+
+    function checkBookmark() {
+      const saved = localStorage.getItem(bookmarkKey());
+      document.getElementById('bookmarkBanner').style.display = saved ? 'flex' : 'none';
+    }
+
+    function goToBookmark() {
+      const saved = localStorage.getItem(bookmarkKey());
+      if (!saved) return;
+      const data = JSON.parse(saved);
+      document.getElementById('readingContent').scrollTop = data.scrollTop;
+      document.getElementById('bookmarkBanner').style.display = 'none';
+    }
+
+    // --- Progresso di lettura audio (ripresa TTS) ---
+    function getProgressKey(bookId) {
+      return `tts_progress_${bookId}`;
+    }
+
+    function saveProgress(bookId, index) {
+      if (!bookId) return;
+      localStorage.setItem(getProgressKey(bookId), String(index));
+    }
+
+    // --- Libreria libri recenti ---
+    function getLibrary() {
+      return JSON.parse(localStorage.getItem('tts_library') || '[]');
+    }
+
+    function updateLibrary(bookId, title, progress) {
+      if (!bookId) return;
+      let lib = getLibrary();
+      const idx = lib.findIndex(b => b.bookId === bookId);
+      const entry = { bookId, title: title || 'Senza titolo', progress: progress || 0, lastOpened: Date.now() };
+      if (idx >= 0) lib[idx] = { ...lib[idx], ...entry };
+      else lib.unshift(entry);
+      lib = lib.sort((a, b) => b.lastOpened - a.lastOpened).slice(0, 10);
+      localStorage.setItem('tts_library', JSON.stringify(lib));
+      renderLibrary();
+    }
+
+    function removeLibraryEntry(bookId) {
+      let lib = getLibrary().filter(b => b.bookId !== bookId);
+      localStorage.setItem('tts_library', JSON.stringify(lib));
+      localStorage.removeItem(`tts_progress_${bookId}`);
+      localStorage.removeItem(`tts_bookmark_${bookId}`);
+      renderLibrary();
+    }
+
+    function renderLibrary() {
+      const lib = getLibrary();
+      const container = document.getElementById('libraryContainer');
+      const list = document.getElementById('libraryList');
+      if (lib.length === 0) {
+        container.style.display = 'none';
+        return;
+      }
+      container.style.display = 'block';
+      list.innerHTML = lib.map(b => `
+        <div class="library-item">
+          <span>${escapeHtml(b.title)} — ${b.progress}%</span>
+          <button onclick="removeLibraryEntry('${b.bookId}')">🗑</button>
+        </div>
+      `).join('');
+    }
+
+    // --- Caricamento ePub con capitoli ---
     async function loadEpub(event) {
       const file = event.target.files[0];
       if (!file) return;
@@ -88,19 +426,25 @@
           const book = ePub(e.target.result);
           await book.ready;
 
-          let fullText = "";
+          const chapters = [];
+          let chapterNum = 0;
           const spine = book.spine;
 
           for (const item of spine.spineItems) {
             const doc = await item.load(book.load.bind(book));
             const text = doc.textContent || (doc.body && doc.body.innerText) || "";
             if (text.trim()) {
-              fullText += text.trim() + "\n\n";
+              chapterNum++;
+              chapters.push({ label: `Capitolo ${chapterNum}`, text: text.trim() });
             }
           }
 
+          const fullText = chapters.map(c => c.text).join("\n\n");
           textInput.value = fullText;
           showStatus("ePub caricato con successo! Premi 'Leggi Testo'.", false);
+
+          const title = file.name.replace(/\.epub$/i, '');
+          renderReadingView(fullText, chapters, title);
         };
         reader.readAsArrayBuffer(file);
       } catch (err) {
@@ -125,15 +469,17 @@
       return chunks;
     }
 
-    async function fetchChunkAudio(chunkText, voice) {
+    async function fetchChunkAudio(text, voice, rate) {
       const cleanUrl = WORKER_URL.replace(/\/$/, "");
       const response = await fetch(cleanUrl, {
         method: "POST",
         headers: {
           "Content-Type": "text/plain",
-          "X-Voice": voice
+          "X-Voice": voice,
+          "X-Rate": rate,
+          "X-App-Token": APP_TOKEN
         },
-        body: chunkText
+        body: text
       });
 
       if (!response.ok) {
@@ -142,55 +488,101 @@
       }
 
       const blob = await response.blob();
-      return URL.createObjectURL(blob);
+      return { url: URL.createObjectURL(blob), blob };
     }
 
     async function processAndPlay() {
       const text = document.getElementById('textInput').value;
+      const engine = document.getElementById('engineSelect').value;
       const voice = document.getElementById('voiceSelect').value;
+      const rate = document.getElementById('rateSelect').value;
       const playBtn = document.getElementById('playBtn');
-      const audioPlayer = document.getElementById('audioPlayer');
 
       if (!text.trim()) {
         showStatus("Inserisci o carica un testo!", true);
         return;
       }
 
+      if (engine === 'browser' && !('speechSynthesis' in window)) {
+        showStatus("Il tuo browser non supporta la sintesi vocale integrata.", true);
+        return;
+      }
+
       currentChunks = chunkText(text);
+      chunkBlobs = new Array(currentChunks.length);
+      prefetchCache = {};
+
+      if (!currentBookId) {
+        currentBookId = getBookId(text);
+        currentBookTitle = currentBookTitle || (text.trim().slice(0, 40) || 'Testo senza titolo');
+      }
+
       currentIndex = 0;
+      const savedIndex = parseInt(localStorage.getItem(getProgressKey(currentBookId)) || "0", 10);
+      if (savedIndex > 0 && savedIndex < currentChunks.length) {
+        const resume = confirm(`Hai un progresso di lettura salvato (parte ${savedIndex + 1} di ${currentChunks.length}). Vuoi riprendere da lì?`);
+        if (resume) currentIndex = savedIndex;
+      }
+
       playbackToken++;
       const myToken = playbackToken;
 
       playBtn.disabled = true;
       showStatus("Generazione audio in corso...", false);
 
-      await playFrom(myToken, voice);
+      await playFrom(myToken, voice, rate, engine);
     }
 
-    async function playFrom(myToken, voice) {
+    async function playFrom(myToken, voice, rate, engine) {
       const playBtn = document.getElementById('playBtn');
       const audioPlayer = document.getElementById('audioPlayer');
 
       while (currentIndex < currentChunks.length) {
-        if (myToken !== playbackToken) return; // interrotto da stopPlayback
+        if (myToken !== playbackToken) return;
 
         showProgress(`Parte ${currentIndex + 1} di ${currentChunks.length}`);
 
         try {
-          const audioUrl = await fetchChunkAudio(currentChunks[currentIndex], voice);
-          if (myToken !== playbackToken) return;
+          if (engine === 'browser') {
+            const voiceObj = getSelectedBrowserVoice();
+            const rateMultiplier = rateToMultiplier(rate);
+            showStatus("Riproduzione (voce browser) avviata!", false);
+            await speakChunkBrowser(currentChunks[currentIndex], voiceObj, rateMultiplier);
+            if (myToken !== playbackToken) return;
+          } else {
+            let result;
+            if (prefetchCache[currentIndex]) {
+              result = await prefetchCache[currentIndex];
+              delete prefetchCache[currentIndex];
+            } else {
+              result = await fetchChunkAudio(currentChunks[currentIndex], voice, rate);
+            }
+            if (myToken !== playbackToken) return;
 
-          audioPlayer.src = audioUrl;
-          showStatus("Riproduzione avviata!", false);
+            chunkBlobs[currentIndex] = result.blob;
+            addUsedCharacters(currentChunks[currentIndex].length);
+            audioPlayer.src = result.url;
+            showStatus("Riproduzione avviata!", false);
 
-          await new Promise((resolve, reject) => {
-            audioPlayer.onended = resolve;
-            audioPlayer.onerror = () => reject(new Error("Errore riproduzione audio"));
-            audioPlayer.play().catch(reject);
-          });
+            // Prefetch del prossimo chunk mentre riproduciamo quello corrente
+            const nextIndex = currentIndex + 1;
+            if (nextIndex < currentChunks.length && !prefetchCache[nextIndex]) {
+              prefetchCache[nextIndex] = fetchChunkAudio(currentChunks[nextIndex], voice, rate)
+                .catch(e => { delete prefetchCache[nextIndex]; throw e; });
+            }
 
-          if (myToken !== playbackToken) return;
+            await new Promise((resolve, reject) => {
+              audioPlayer.onended = resolve;
+              audioPlayer.onerror = () => reject(new Error("Errore riproduzione audio"));
+              audioPlayer.play().catch(reject);
+            });
+
+            if (myToken !== playbackToken) return;
+          }
+
           currentIndex++;
+          saveProgress(currentBookId, currentIndex);
+          updateLibrary(currentBookId, currentBookTitle, Math.round(currentIndex / currentChunks.length * 100));
         } catch (e) {
           showStatus("Errore: " + e.message, true);
           break;
@@ -200,17 +592,45 @@
       if (myToken === playbackToken && currentIndex >= currentChunks.length) {
         showStatus("Lettura completata!", false);
         document.getElementById('progress').style.display = 'none';
+        localStorage.removeItem(getProgressKey(currentBookId));
+        updateLibrary(currentBookId, currentBookTitle, 100);
       }
       playBtn.disabled = false;
     }
 
     function stopPlayback() {
-      playbackToken++; // invalida il ciclo in corso
+      playbackToken++;
       const audioPlayer = document.getElementById('audioPlayer');
       audioPlayer.pause();
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
       document.getElementById('playBtn').disabled = false;
       showStatus("Riproduzione interrotta.", false);
     }
+
+    function downloadMp3() {
+      if (document.getElementById('engineSelect').value === 'browser') {
+        showStatus("Il download MP3 funziona solo con la voce Azure, non con quella del browser.", true);
+        return;
+      }
+      const collected = chunkBlobs.filter(Boolean);
+      if (collected.length === 0) {
+        showStatus("Nessun audio generato ancora da scaricare. Avvia la lettura prima.", true);
+        return;
+      }
+      const combined = new Blob(collected, { type: 'audio/mpeg' });
+      const url = URL.createObjectURL(combined);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (currentBookTitle || 'lettura').replace(/[^\w\-]+/g, '_') + '.mp3';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      showStatus("Download MP3 avviato (solo le parti già generate).", false);
+    }
+
+    renderUsageCounter();
+    renderLibrary();
   </script>
 </body>
 </html>

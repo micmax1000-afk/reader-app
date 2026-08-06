@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -86,17 +87,17 @@
 
   <div class="controls">
     <button id="genReadingBtn" onclick="startReadingFromTextarea()" style="background:#0066cc;">📖 Vista lettura</button>
-    <select id="engineSelect" onchange="onEngineChange()">
+    <select id="engineSelect" onchange="onEngineChange(); saveTtsPrefs();">
       <option value="azure">Voce Azure (neurale, a consumo)</option>
       <option value="browser">Voce del browser (gratis, illimitata)</option>
     </select>
-    <select id="voiceSelect">
+    <select id="voiceSelect" onchange="saveTtsPrefs()">
       <option value="it-IT-DiegoNeural">Diego (Italiano - Maschile)</option>
       <option value="it-IT-ElianaNeural">Eliana (Italiano - Femminile)</option>
       <option value="it-IT-IsabellaNeural">Isabella (Italiano - Espressiva)</option>
     </select>
-    <select id="browserVoiceSelect" style="display:none;"></select>
-    <select id="rateSelect">
+    <select id="browserVoiceSelect" onchange="saveTtsPrefs()" style="display:none;"></select>
+    <select id="rateSelect" onchange="saveTtsPrefs()">
       <option value="0%">Velocità: Normale</option>
       <option value="-25%">Velocità: Lenta</option>
       <option value="+20%">Velocità: Veloce</option>
@@ -129,6 +130,7 @@
     let activeEngine = 'azure';
     let activeVoice = null;
     let activeRate = '0%';
+    let currentPlaybackAbort = null;
 
     function showStatus(msg, isError = false) {
       const status = document.getElementById('status');
@@ -207,6 +209,30 @@
       if (engine === 'browser') populateBrowserVoices();
     }
 
+    let pendingBrowserVoiceName = null;
+
+    function saveTtsPrefs() {
+      const voiceObj = getSelectedBrowserVoice();
+      const prefs = {
+        engine: document.getElementById('engineSelect').value,
+        voice: document.getElementById('voiceSelect').value,
+        rate: document.getElementById('rateSelect').value,
+        browserVoiceName: voiceObj ? voiceObj.name : null
+      };
+      localStorage.setItem('tts_prefs', JSON.stringify(prefs));
+    }
+
+    function applySavedTtsPrefs() {
+      let prefs = null;
+      try { prefs = JSON.parse(localStorage.getItem('tts_prefs') || 'null'); } catch (e) { prefs = null; }
+      if (!prefs) return;
+      if (prefs.engine) document.getElementById('engineSelect').value = prefs.engine;
+      if (prefs.voice) document.getElementById('voiceSelect').value = prefs.voice;
+      if (prefs.rate) document.getElementById('rateSelect').value = prefs.rate;
+      onEngineChange();
+      if (prefs.browserVoiceName) pendingBrowserVoiceName = prefs.browserVoiceName;
+    }
+
     function populateBrowserVoices() {
       if (!('speechSynthesis' in window)) return;
       const sel = document.getElementById('browserVoiceSelect');
@@ -216,6 +242,12 @@
       const list = itVoices.length ? itVoices : voices;
       sel.innerHTML = list.map((v, i) => `<option value="${i}">${escapeHtml(v.name)} (${v.lang})</option>`).join('');
       sel._voiceList = list;
+
+      if (pendingBrowserVoiceName) {
+        const idx = list.findIndex(v => v.name === pendingBrowserVoiceName);
+        if (idx >= 0) sel.value = String(idx);
+        pendingBrowserVoiceName = null;
+      }
     }
 
     function getSelectedBrowserVoice() {
@@ -632,9 +664,13 @@
             }
 
             await new Promise((resolve, reject) => {
-              audioPlayer.onended = resolve;
-              audioPlayer.onerror = () => reject(new Error("Errore riproduzione audio"));
-              audioPlayer.play().catch(reject);
+              audioPlayer.onended = () => { currentPlaybackAbort = null; resolve(); };
+              audioPlayer.onerror = () => { currentPlaybackAbort = null; reject(new Error("Errore riproduzione audio")); };
+              currentPlaybackAbort = () => { currentPlaybackAbort = null; resolve(); };
+              audioPlayer.play().catch(err => {
+                if (myToken !== playbackToken) { resolve(); return; } // interrotto volontariamente, non è un vero errore
+                reject(err);
+              });
             });
 
             if (myToken !== playbackToken) return;
@@ -644,19 +680,23 @@
           saveProgress(currentBookId, currentIndex);
           updateLibrary(currentBookId, currentBookTitle, Math.round(currentIndex / currentChunks.length * 100));
         } catch (e) {
-          showStatus("Errore: " + e.message, true);
+          if (myToken === playbackToken) {
+            showStatus("Errore: " + e.message, true);
+          }
           break;
         }
       }
 
-      if (myToken === playbackToken && currentIndex >= currentChunks.length) {
-        showStatus("Lettura completata!", false);
-        document.getElementById('progress').style.display = 'none';
-        localStorage.removeItem(getProgressKey(currentBookId));
-        updateLibrary(currentBookId, currentBookTitle, 100);
-        clearHighlight();
+      if (myToken === playbackToken) {
+        if (currentIndex >= currentChunks.length) {
+          showStatus("Lettura completata!", false);
+          document.getElementById('progress').style.display = 'none';
+          localStorage.removeItem(getProgressKey(currentBookId));
+          updateLibrary(currentBookId, currentBookTitle, 100);
+          clearHighlight();
+        }
+        playBtn.disabled = false;
       }
-      playBtn.disabled = false;
     }
 
     function togglePause() {
@@ -694,6 +734,7 @@
       playbackToken++;
       const audioPlayer = document.getElementById('audioPlayer');
       audioPlayer.pause();
+      if (currentPlaybackAbort) { currentPlaybackAbort(); }
       if ('speechSynthesis' in window) speechSynthesis.cancel();
       isPaused = false;
       softPauseRequested = false;
@@ -727,6 +768,7 @@
 
     renderUsageCounter();
     renderLibrary();
+    applySavedTtsPrefs();
   </script>
 </body>
 </html>

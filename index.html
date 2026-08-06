@@ -1,9 +1,6 @@
-
 <!DOCTYPE html>
 <html lang="it">
 <head>
-  <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="icon-180.png">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Lettore TTS Neural & ePub</title>
@@ -46,7 +43,7 @@
     #readingContent p { margin: 0 0 1em 0; }
     #readingContent h3 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; color: #888; margin: 1.2em 0 0.6em 0; }
     .tts-chunk { transition: background-color 0.25s ease; border-radius: 3px; }
-    .tts-chunk.tts-active { background-color: #fff176; }
+    .tts-chunk.tts-active { background-color: #ffe066; box-shadow: 0 0 0 2px #ffe066; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -130,6 +127,8 @@
     let lastChapters = null;
     let isPaused = false;
     let activeEngine = 'azure';
+    let activeVoice = null;
+    let activeRate = '0%';
 
     function showStatus(msg, isError = false) {
       const status = document.getElementById('status');
@@ -231,13 +230,18 @@
       return map[rateStr] || 1.0;
     }
 
+    let softPauseRequested = false; // pausa "a blocchi" per il motore browser (Android non supporta il vero pause/resume)
+
     function speakChunkBrowser(text, voice, rateMultiplier) {
       return new Promise((resolve, reject) => {
         const utter = new SpeechSynthesisUtterance(text);
         if (voice) utter.voice = voice;
         utter.rate = rateMultiplier;
-        utter.onend = resolve;
-        utter.onerror = (e) => reject(new Error("Errore voce browser: " + (e.error || 'sconosciuto')));
+        utter.onend = () => resolve(!softPauseRequested);
+        utter.onerror = (e) => {
+          if (softPauseRequested) { resolve(false); return; }
+          reject(new Error("Errore voce browser: " + (e.error || 'sconosciuto')));
+        };
         speechSynthesis.speak(utter);
       });
     }
@@ -571,7 +575,10 @@
       playbackToken++;
       const myToken = playbackToken;
       isPaused = false;
+      softPauseRequested = false;
       activeEngine = engine;
+      activeVoice = voice;
+      activeRate = rate;
       updatePauseButtonLabel();
 
       playBtn.disabled = true;
@@ -595,8 +602,13 @@
             const voiceObj = getSelectedBrowserVoice();
             const rateMultiplier = rateToMultiplier(rate);
             showStatus("Riproduzione (voce browser) avviata!", false);
-            await speakChunkBrowser(currentChunks[currentIndex], voiceObj, rateMultiplier);
+            const completedNaturally = await speakChunkBrowser(currentChunks[currentIndex], voiceObj, rateMultiplier);
             if (myToken !== playbackToken) return;
+            if (!completedNaturally) {
+              // Interrotto da pausa: resta su questo chunk, il ciclo riparte da qui alla ripresa
+              playBtn.disabled = false;
+              return;
+            }
           } else {
             let result;
             if (prefetchCache[currentIndex]) {
@@ -650,14 +662,27 @@
     function togglePause() {
       if (activeEngine === 'browser') {
         if (!('speechSynthesis' in window)) return;
-        if (isPaused) { speechSynthesis.resume(); isPaused = false; }
-        else { speechSynthesis.pause(); isPaused = true; }
+        if (isPaused) {
+          // Riprendi: rilancia il ciclo dallo stesso chunk (la frase riparte da capo)
+          isPaused = false;
+          softPauseRequested = false;
+          updatePauseButtonLabel();
+          showStatus("Lettura ripresa (voce browser)...", false);
+          document.getElementById('playBtn').disabled = true;
+          playFrom(playbackToken, activeVoice, activeRate, activeEngine);
+        } else {
+          softPauseRequested = true;
+          isPaused = true;
+          speechSynthesis.cancel();
+          updatePauseButtonLabel();
+          showStatus("In pausa.", false);
+        }
       } else {
         const audioPlayer = document.getElementById('audioPlayer');
         if (isPaused) { audioPlayer.play(); isPaused = false; }
         else { audioPlayer.pause(); isPaused = true; }
+        updatePauseButtonLabel();
       }
-      updatePauseButtonLabel();
     }
 
     function updatePauseButtonLabel() {
@@ -671,6 +696,7 @@
       audioPlayer.pause();
       if ('speechSynthesis' in window) speechSynthesis.cancel();
       isPaused = false;
+      softPauseRequested = false;
       updatePauseButtonLabel();
       clearHighlight();
       document.getElementById('playBtn').disabled = false;

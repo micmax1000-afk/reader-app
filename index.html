@@ -98,6 +98,9 @@
     </select>
     <select id="browserVoiceSelect" onchange="saveTtsPrefs()" style="display:none;"></select>
     <button id="reloadVoicesBtn" onclick="forceReloadVoices()" style="display:none; background:#6c757d;">🔄 Ricarica voci</button>
+    <div id="voiceInfoNote" style="display:none; font-size:12px; color:#666; background:#f0f4f8; border:1px solid #dde5ec; border-radius:6px; padding:8px 10px; line-height:1.4;">
+      ℹ️ Le voci gratuite arrivano dal motore di sintesi vocale installato sul tuo telefono (di solito "Servizi vocali Google"), non dal browser stesso — per questo variano da dispositivo a dispositivo. Per più scelta: <b>Impostazioni → Lingue e immissione → Uscita sintesi vocale</b>, controlla i dati vocali installati o prova un altro motore TTS dal Play Store.
+    </div>
     <select id="rateSelect" onchange="saveTtsPrefs()">
       <option value="0%">Velocità: Normale</option>
       <option value="-25%">Velocità: Lenta</option>
@@ -208,6 +211,7 @@
       document.getElementById('voiceSelect').style.display = engine === 'azure' ? 'block' : 'none';
       document.getElementById('browserVoiceSelect').style.display = engine === 'browser' ? 'block' : 'none';
       document.getElementById('reloadVoicesBtn').style.display = engine === 'browser' ? 'block' : 'none';
+      document.getElementById('voiceInfoNote').style.display = engine === 'browser' ? 'block' : 'none';
       if (engine === 'browser') populateBrowserVoices();
     }
 

@@ -2,6 +2,8 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-180.png">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Lettore TTS Neural & ePub</title>
@@ -43,6 +45,8 @@
     #readingContent { background: #fffdf7; color: #333; border: 1px solid #e0d9c5; border-radius: 10px; padding: 20px; margin-bottom: 15px; font-family: Georgia, 'Times New Roman', serif; font-size: 18px; line-height: 1.7; text-align: justify; max-height: 60vh; overflow-y: auto; box-shadow: 0 1px 4px rgba(0,0,0,0.08); scroll-behavior: smooth; }
     #readingContent p { margin: 0 0 1em 0; }
     #readingContent h3 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; color: #888; margin: 1.2em 0 0.6em 0; }
+    .tts-chunk { transition: background-color 0.25s ease; border-radius: 3px; }
+    .tts-chunk.tts-active { background-color: #fff176; }
   </style>
 </head>
 <body>
@@ -102,6 +106,7 @@
       <option value="+40%">Velocità: Molto veloce</option>
     </select>
     <button id="playBtn" onclick="processAndPlay()">Leggi Testo</button>
+    <button id="pauseBtn" onclick="togglePause()" style="background:#f0ad4e;">⏸ Pausa</button>
     <button id="stopBtn" onclick="stopPlayback()" style="background:#d9534f;">Ferma</button>
   </div>
 
@@ -122,6 +127,9 @@
 
     let currentBookId = null;
     let currentBookTitle = null;
+    let lastChapters = null;
+    let isPaused = false;
+    let activeEngine = 'azure';
 
     function showStatus(msg, isError = false) {
       const status = document.getElementById('status');
@@ -277,32 +285,49 @@
       renderReadingView(text, null, title);
     }
 
+    function buildAndRenderChunks(text, chapters) {
+      const navContainer = document.getElementById('chapterNav');
+      const content = document.getElementById('readingContent');
+      const chunks = [];
+
+      function renderBlock(blockText) {
+        const paragraphs = blockText.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+        return paragraphs.map(p => {
+          const pChunks = chunkText(p);
+          const spans = pChunks.map(chunk => {
+            const globalIndex = chunks.length;
+            chunks.push(chunk);
+            return `<span class="tts-chunk" id="chunk-${globalIndex}">${escapeHtml(chunk)} </span>`;
+          }).join('');
+          return `<p>${spans}</p>`;
+        }).join('');
+      }
+
+      let html;
+      if (chapters && chapters.length > 1) {
+        navContainer.style.display = 'flex';
+        navContainer.innerHTML = chapters.map((c, i) => `<button onclick="scrollToChapter(${i})">${escapeHtml(c.label)}</button>`).join('');
+        html = chapters.map((c, ci) => `<div id="chapter-${ci}"><h3>${escapeHtml(c.label)}</h3>${renderBlock(c.text)}</div>`).join('');
+      } else {
+        navContainer.style.display = 'none';
+        navContainer.innerHTML = '';
+        html = renderBlock(text);
+      }
+
+      content.innerHTML = html;
+      return chunks;
+    }
+
     function renderReadingView(text, chapters, title) {
       if (!text || !text.trim()) {
         showStatus("Inserisci o carica un testo prima!", true);
         return;
       }
 
-      const content = document.getElementById('readingContent');
-      const navContainer = document.getElementById('chapterNav');
-
-      if (chapters && chapters.length > 1) {
-        navContainer.style.display = 'flex';
-        navContainer.innerHTML = chapters.map((c, i) => `<button onclick="scrollToChapter(${i})">${escapeHtml(c.label)}</button>`).join('');
-        content.innerHTML = chapters.map((c, i) => {
-          const paragraphs = c.text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-          return `<div id="chapter-${i}"><h3>${escapeHtml(c.label)}</h3>` + paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('') + `</div>`;
-        }).join('');
-      } else {
-        navContainer.style.display = 'none';
-        navContainer.innerHTML = '';
-        const paragraphs = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-        content.innerHTML = paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('');
-      }
-
+      currentChunks = buildAndRenderChunks(text, chapters);
       currentBookId = getBookId(text);
       currentBookTitle = title || 'Senza titolo';
-      currentChunks = chunkText(text);
+      lastChapters = chapters || null;
 
       document.getElementById('textInput').style.display = 'none';
       document.getElementById('readingView').style.display = 'block';
@@ -315,10 +340,34 @@
       const progressPercent = currentChunks.length ? Math.round(savedIndex / currentChunks.length * 100) : 0;
       updateLibrary(currentBookId, currentBookTitle, progressPercent);
 
+      const content = document.getElementById('readingContent');
       content.onscroll = () => {
         clearTimeout(autoSaveTimer);
         autoSaveTimer = setTimeout(() => saveBookmark(true), 800);
       };
+    }
+
+    function ensureReadingView(text) {
+      const candidateId = getBookId(text);
+      const readingHidden = document.getElementById('readingView').style.display !== 'block';
+      if (currentBookId !== candidateId || !currentChunks.length || readingHidden) {
+        const title = (currentBookId === candidateId && currentBookTitle) ? currentBookTitle : (text.trim().slice(0, 40) || 'Testo senza titolo');
+        renderReadingView(text, lastChapters, title);
+      }
+    }
+
+    function highlightChunk(index) {
+      clearHighlight();
+      const el = document.getElementById('chunk-' + index);
+      if (el) {
+        el.classList.add('tts-active');
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+
+    function clearHighlight() {
+      const prev = document.querySelector('.tts-chunk.tts-active');
+      if (prev) prev.classList.remove('tts-active');
     }
 
     function scrollToChapter(i) {
@@ -508,14 +557,9 @@
         return;
       }
 
-      currentChunks = chunkText(text);
+      ensureReadingView(text);
       chunkBlobs = new Array(currentChunks.length);
       prefetchCache = {};
-
-      if (!currentBookId) {
-        currentBookId = getBookId(text);
-        currentBookTitle = currentBookTitle || (text.trim().slice(0, 40) || 'Testo senza titolo');
-      }
 
       currentIndex = 0;
       const savedIndex = parseInt(localStorage.getItem(getProgressKey(currentBookId)) || "0", 10);
@@ -526,6 +570,9 @@
 
       playbackToken++;
       const myToken = playbackToken;
+      isPaused = false;
+      activeEngine = engine;
+      updatePauseButtonLabel();
 
       playBtn.disabled = true;
       showStatus("Generazione audio in corso...", false);
@@ -541,6 +588,7 @@
         if (myToken !== playbackToken) return;
 
         showProgress(`Parte ${currentIndex + 1} di ${currentChunks.length}`);
+        highlightChunk(currentIndex);
 
         try {
           if (engine === 'browser') {
@@ -594,8 +642,27 @@
         document.getElementById('progress').style.display = 'none';
         localStorage.removeItem(getProgressKey(currentBookId));
         updateLibrary(currentBookId, currentBookTitle, 100);
+        clearHighlight();
       }
       playBtn.disabled = false;
+    }
+
+    function togglePause() {
+      if (activeEngine === 'browser') {
+        if (!('speechSynthesis' in window)) return;
+        if (isPaused) { speechSynthesis.resume(); isPaused = false; }
+        else { speechSynthesis.pause(); isPaused = true; }
+      } else {
+        const audioPlayer = document.getElementById('audioPlayer');
+        if (isPaused) { audioPlayer.play(); isPaused = false; }
+        else { audioPlayer.pause(); isPaused = true; }
+      }
+      updatePauseButtonLabel();
+    }
+
+    function updatePauseButtonLabel() {
+      const btn = document.getElementById('pauseBtn');
+      if (btn) btn.innerText = isPaused ? '▶️ Riprendi' : '⏸ Pausa';
     }
 
     function stopPlayback() {
@@ -603,6 +670,9 @@
       const audioPlayer = document.getElementById('audioPlayer');
       audioPlayer.pause();
       if ('speechSynthesis' in window) speechSynthesis.cancel();
+      isPaused = false;
+      updatePauseButtonLabel();
+      clearHighlight();
       document.getElementById('playBtn').disabled = false;
       showStatus("Riproduzione interrotta.", false);
     }

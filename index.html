@@ -97,6 +97,7 @@
       <option value="it-IT-IsabellaNeural">Isabella (Italiano - Espressiva)</option>
     </select>
     <select id="browserVoiceSelect" onchange="saveTtsPrefs()" style="display:none;"></select>
+    <button id="reloadVoicesBtn" onclick="forceReloadVoices()" style="display:none; background:#6c757d;">🔄 Ricarica voci</button>
     <select id="rateSelect" onchange="saveTtsPrefs()">
       <option value="0%">Velocità: Normale</option>
       <option value="-25%">Velocità: Lenta</option>
@@ -206,6 +207,7 @@
       const engine = document.getElementById('engineSelect').value;
       document.getElementById('voiceSelect').style.display = engine === 'azure' ? 'block' : 'none';
       document.getElementById('browserVoiceSelect').style.display = engine === 'browser' ? 'block' : 'none';
+      document.getElementById('reloadVoicesBtn').style.display = engine === 'browser' ? 'block' : 'none';
       if (engine === 'browser') populateBrowserVoices();
     }
 
@@ -233,21 +235,47 @@
       if (prefs.browserVoiceName) pendingBrowserVoiceName = prefs.browserVoiceName;
     }
 
+    let voicePollAttempts = 0;
+
     function populateBrowserVoices() {
       if (!('speechSynthesis' in window)) return;
       const sel = document.getElementById('browserVoiceSelect');
       const voices = speechSynthesis.getVoices();
-      if (!voices.length) return; // arriveranno con l'evento voiceschanged
+
+      if (!voices.length) {
+        // Su alcuni dispositivi (in particolare app installate/TWA su Android) le voci
+        // arrivano in ritardo o l'evento voiceschanged non scatta: riproviamo per qualche secondo.
+        if (voicePollAttempts < 15) {
+          voicePollAttempts++;
+          setTimeout(populateBrowserVoices, 400);
+        } else {
+          sel.innerHTML = '<option value="">Nessuna voce trovata</option>';
+          showStatus("Nessuna voce gratuita trovata sul dispositivo. Controlla in Impostazioni Android → Lingue e immissione → Sintesi vocale che il motore Google TTS sia installato e abbia dati voce scaricati per l'italiano, poi premi \"🔄 Ricarica voci\".", true);
+        }
+        return;
+      }
+
+      voicePollAttempts = 0;
       const itVoices = voices.filter(v => v.lang && v.lang.toLowerCase().startsWith('it'));
       const list = itVoices.length ? itVoices : voices;
       sel.innerHTML = list.map((v, i) => `<option value="${i}">${escapeHtml(v.name)} (${v.lang})</option>`).join('');
       sel._voiceList = list;
+
+      if (!itVoices.length) {
+        showStatus("Nessuna voce italiana trovata: mostro tutte le voci disponibili sul dispositivo.", true);
+      }
 
       if (pendingBrowserVoiceName) {
         const idx = list.findIndex(v => v.name === pendingBrowserVoiceName);
         if (idx >= 0) sel.value = String(idx);
         pendingBrowserVoiceName = null;
       }
+    }
+
+    function forceReloadVoices() {
+      voicePollAttempts = 0;
+      showStatus("Ricerca voci in corso...", false);
+      populateBrowserVoices();
     }
 
     function getSelectedBrowserVoice() {

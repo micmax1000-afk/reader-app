@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -657,6 +656,12 @@
         const resume = confirm(`Hai un progresso di lettura salvato (parte ${savedIndex + 1} di ${currentChunks.length}). Vuoi riprendere da lì?`);
         if (resume) currentIndex = savedIndex;
       }
+
+      // Ferma sempre qualsiasi lettura precedente (audio o voce browser) prima di iniziare quella nuova
+      const audioPlayerEl = document.getElementById('audioPlayer');
+      audioPlayerEl.pause();
+      if (currentPlaybackAbort) { currentPlaybackAbort(); }
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
 
       playbackToken++;
       const myToken = playbackToken;

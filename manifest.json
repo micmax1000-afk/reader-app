@@ -2,7 +2,7 @@
   "name": "Lettore TTS Neural & ePub",
   "short_name": "Lettore TTS",
   "description": "Lettore di ePub con sintesi vocale neurale",
-  "start_url": "./reader-app.html",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",

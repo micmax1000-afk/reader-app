@@ -89,12 +89,19 @@
     <button id="genReadingBtn" onclick="startReadingFromTextarea()" style="background:#0066cc;">📖 Vista lettura</button>
     <select id="engineSelect" onchange="onEngineChange(); saveTtsPrefs();">
       <option value="azure">Voce Azure (neurale, a consumo)</option>
+      <option value="google">Voce Google Cloud (neurale, a consumo)</option>
       <option value="browser">Voce del browser (gratis, illimitata)</option>
     </select>
     <select id="voiceSelect" onchange="saveTtsPrefs()">
       <option value="it-IT-DiegoNeural">Diego (Italiano - Maschile)</option>
       <option value="it-IT-ElianaNeural">Eliana (Italiano - Femminile)</option>
       <option value="it-IT-IsabellaNeural">Isabella (Italiano - Espressiva)</option>
+    </select>
+    <select id="googleVoiceSelect" onchange="saveTtsPrefs()" style="display:none;">
+      <option value="it-IT-Wavenet-A">Wavenet A (Italiano - Femminile)</option>
+      <option value="it-IT-Wavenet-B">Wavenet B (Italiano - Maschile)</option>
+      <option value="it-IT-Wavenet-C">Wavenet C (Italiano - Femminile)</option>
+      <option value="it-IT-Wavenet-D">Wavenet D (Italiano - Maschile)</option>
     </select>
     <select id="browserVoiceSelect" onchange="saveTtsPrefs()" style="display:none;"></select>
     <button id="reloadVoicesBtn" onclick="forceReloadVoices()" style="display:none; background:#6c757d;">🔄 Ricarica voci</button>
@@ -119,7 +126,7 @@
 
   <script>
     const WORKER_URL = "https://azure-tts-proxy.mic-max-1000.workers.dev";
-    const APP_TOKEN = "METTI_QUI_LO_STESSO_TOKEN_DEL_WORKER";
+    const WORKER_URL_GOOGLE = "https://google-tts-proxy.mic-max-1000.workers.dev";
 
     let currentChunks = [];
     let currentIndex = 0;
@@ -151,41 +158,47 @@
       p.innerText = msg;
     }
 
-    // --- Contatore caratteri gratuiti (stima locale, per browser) ---
-    const FREE_MONTHLY_LIMIT = 500000;
+    // --- Contatore caratteri gratuiti (stima locale, per provider) ---
+    const FREE_LIMITS = { azure: 500000, google: 4000000 };
 
-    function currentMonthKey() {
+    function currentMonthSuffix() {
       const now = new Date();
-      return `tts_usage_${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     }
 
-    function getUsedCharacters() {
-      const key = currentMonthKey();
-      return parseInt(localStorage.getItem(key) || "0", 10);
+    function usageKey(provider) {
+      return `tts_usage_${provider}_${currentMonthSuffix()}`;
     }
 
-    function addUsedCharacters(count) {
-      const key = currentMonthKey();
-      const updated = getUsedCharacters() + count;
+    function getUsedCharacters(provider) {
+      return parseInt(localStorage.getItem(usageKey(provider)) || "0", 10);
+    }
+
+    function addUsedCharacters(count, provider) {
+      const key = usageKey(provider);
+      const updated = getUsedCharacters(provider) + count;
       localStorage.setItem(key, String(updated));
-      cleanupOldMonths(key);
+      cleanupOldMonths();
       renderUsageCounter();
     }
 
-    function cleanupOldMonths(currentKey) {
-      for (let i = 0; i < localStorage.length; i++) {
+    function cleanupOldMonths() {
+      const suffix = currentMonthSuffix();
+      for (let i = localStorage.length - 1; i >= 0; i--) {
         const k = localStorage.key(i);
-        if (k && k.startsWith("tts_usage_") && k !== currentKey) {
+        if (k && k.startsWith("tts_usage_") && !k.endsWith(suffix)) {
           localStorage.removeItem(k);
         }
       }
     }
 
     function renderUsageCounter() {
-      const used = getUsedCharacters();
-      const remaining = Math.max(0, FREE_MONTHLY_LIMIT - used);
+      const azureUsed = getUsedCharacters('azure');
+      const googleUsed = getUsedCharacters('google');
+      const azureRemaining = Math.max(0, FREE_LIMITS.azure - azureUsed);
+      const googleRemaining = Math.max(0, FREE_LIMITS.google - googleUsed);
       const el = document.getElementById('usageCounter');
-      el.innerText = `Caratteri usati questo mese (stima locale): ${used.toLocaleString('it-IT')} / ${FREE_MONTHLY_LIMIT.toLocaleString('it-IT')} — restano circa ${remaining.toLocaleString('it-IT')} gratuiti`;
+      el.innerHTML = `Stima locale del mese — Azure: ${azureUsed.toLocaleString('it-IT')} / ${FREE_LIMITS.azure.toLocaleString('it-IT')} (restano ${azureRemaining.toLocaleString('it-IT')})<br>Google: ${googleUsed.toLocaleString('it-IT')} / ${FREE_LIMITS.google.toLocaleString('it-IT')} (restano ${googleRemaining.toLocaleString('it-IT')})`;
     }
 
     // --- Vista lettura, segnalibro, capitoli, font/notte ---
@@ -209,6 +222,7 @@
     function onEngineChange() {
       const engine = document.getElementById('engineSelect').value;
       document.getElementById('voiceSelect').style.display = engine === 'azure' ? 'block' : 'none';
+      document.getElementById('googleVoiceSelect').style.display = engine === 'google' ? 'block' : 'none';
       document.getElementById('browserVoiceSelect').style.display = engine === 'browser' ? 'block' : 'none';
       document.getElementById('reloadVoicesBtn').style.display = engine === 'browser' ? 'block' : 'none';
       document.getElementById('voiceInfoNote').style.display = engine === 'browser' ? 'block' : 'none';
@@ -222,6 +236,7 @@
       const prefs = {
         engine: document.getElementById('engineSelect').value,
         voice: document.getElementById('voiceSelect').value,
+        googleVoice: document.getElementById('googleVoiceSelect').value,
         rate: document.getElementById('rateSelect').value,
         browserVoiceName: voiceObj ? voiceObj.name : null
       };
@@ -234,6 +249,7 @@
       if (!prefs) return;
       if (prefs.engine) document.getElementById('engineSelect').value = prefs.engine;
       if (prefs.voice) document.getElementById('voiceSelect').value = prefs.voice;
+      if (prefs.googleVoice) document.getElementById('googleVoiceSelect').value = prefs.googleVoice;
       if (prefs.rate) document.getElementById('rateSelect').value = prefs.rate;
       onEngineChange();
       if (prefs.browserVoiceName) pendingBrowserVoiceName = prefs.browserVoiceName;
@@ -586,15 +602,21 @@
       return chunks;
     }
 
-    async function fetchChunkAudio(text, voice, rate) {
-      const cleanUrl = WORKER_URL.replace(/\/$/, "");
+    function getActiveCloudVoice(engine) {
+      if (engine === 'google') return document.getElementById('googleVoiceSelect').value;
+      return document.getElementById('voiceSelect').value;
+    }
+
+    async function fetchCloudAudio(text, engine, voice, rate) {
+      const isGoogle = engine === 'google';
+      const cleanUrl = (isGoogle ? WORKER_URL_GOOGLE : WORKER_URL).replace(/\/$/, "");
+      const rateHeader = isGoogle ? String(rateToMultiplier(rate)) : rate; // Google vuole un moltiplicatore (es. "1.2"), Azure vuole "+20%"
       const response = await fetch(cleanUrl, {
         method: "POST",
         headers: {
           "Content-Type": "text/plain",
           "X-Voice": voice,
-          "X-Rate": rate,
-          "X-App-Token": APP_TOKEN
+          "X-Rate": rateHeader
         },
         body: text
       });
@@ -611,7 +633,7 @@
     async function processAndPlay() {
       const text = document.getElementById('textInput').value;
       const engine = document.getElementById('engineSelect').value;
-      const voice = document.getElementById('voiceSelect').value;
+      const voice = getActiveCloudVoice(engine);
       const rate = document.getElementById('rateSelect').value;
       const playBtn = document.getElementById('playBtn');
 
@@ -679,19 +701,19 @@
               result = await prefetchCache[currentIndex];
               delete prefetchCache[currentIndex];
             } else {
-              result = await fetchChunkAudio(currentChunks[currentIndex], voice, rate);
+              result = await fetchCloudAudio(currentChunks[currentIndex], engine, voice, rate);
             }
             if (myToken !== playbackToken) return;
 
             chunkBlobs[currentIndex] = result.blob;
-            addUsedCharacters(currentChunks[currentIndex].length);
+            addUsedCharacters(currentChunks[currentIndex].length, engine);
             audioPlayer.src = result.url;
             showStatus("Riproduzione avviata!", false);
 
             // Prefetch del prossimo chunk mentre riproduciamo quello corrente
             const nextIndex = currentIndex + 1;
             if (nextIndex < currentChunks.length && !prefetchCache[nextIndex]) {
-              prefetchCache[nextIndex] = fetchChunkAudio(currentChunks[nextIndex], voice, rate)
+              prefetchCache[nextIndex] = fetchCloudAudio(currentChunks[nextIndex], engine, voice, rate)
                 .catch(e => { delete prefetchCache[nextIndex]; throw e; });
             }
 

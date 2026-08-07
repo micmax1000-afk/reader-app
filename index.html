@@ -131,6 +131,7 @@
   <script>
     const WORKER_URL = "https://azure-tts-proxy.mic-max-1000.workers.dev";
     const WORKER_URL_GOOGLE = "https://google-tts-proxy.mic-max-1000.workers.dev";
+    const APP_TOKEN = "gfSiLrsnkKCBDARB8_D_yKM7-S-Rcm2NWXoOwfDVRIo";
 
     let currentChunks = [];
     let currentIndex = 0;
@@ -651,7 +652,8 @@
         headers: {
           "Content-Type": "text/plain",
           "X-Voice": voice,
-          "X-Rate": rateHeader
+          "X-Rate": rateHeader,
+          "X-App-Token": APP_TOKEN
         },
         body: text
       });

@@ -418,4 +418,413 @@
       checkBookmark();
 
       const savedIndex = parseInt(localStorage.getItem(getProgressKey(currentBookId)) || "0", 10);
-      const p
+      const progressPercent = currentChunks.length ? Math.round(savedIndex / currentChunks.length * 100) : 0;
+      updateLibrary(currentBookId, currentBookTitle, progressPercent);
+
+      const content = document.getElementById('readingContent');
+      content.onscroll = () => {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = setTimeout(() => saveBookmark(true), 800);
+      };
+    }
+
+    function ensureReadingView(text) {
+      const candidateId = getBookId(text);
+      const readingHidden = document.getElementById('readingView').style.display !== 'block';
+      if (currentBookId !== candidateId || !currentChunks.length || readingHidden) {
+        const title = (currentBookId === candidateId && currentBookTitle) ? currentBookTitle : (text.trim().slice(0, 40) || 'Testo senza titolo');
+        renderReadingView(text, lastChapters, title);
+      }
+    }
+
+    function highlightChunk(index) {
+      clearHighlight();
+      const el = document.getElementById('chunk-' + index);
+      if (el) {
+        el.classList.add('tts-active');
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+
+    function clearHighlight() {
+      const prev = document.querySelector('.tts-chunk.tts-active');
+      if (prev) prev.classList.remove('tts-active');
+    }
+
+    function scrollToChapter(i) {
+      const el = document.getElementById('chapter-' + i);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function showTextEditor() {
+      document.getElementById('textInput').style.display = 'block';
+      document.getElementById('readingView').style.display = 'none';
+      document.getElementById('genReadingBtn').style.display = 'inline-block';
+    }
+
+    function bookmarkKey() {
+      return `tts_bookmark_${currentBookId}`;
+    }
+
+    function saveBookmark(silent) {
+      if (!currentBookId) return;
+      const content = document.getElementById('readingContent');
+      const data = { scrollTop: content.scrollTop, savedAt: Date.now() };
+      localStorage.setItem(bookmarkKey(), JSON.stringify(data));
+      if (!silent) showStatus("Segnalibro salvato! 🔖", false);
+    }
+
+    function checkBookmark() {
+      const saved = localStorage.getItem(bookmarkKey());
+      document.getElementById('bookmarkBanner').style.display = saved ? 'flex' : 'none';
+    }
+
+    function goToBookmark() {
+      const saved = localStorage.getItem(bookmarkKey());
+      if (!saved) return;
+      const data = JSON.parse(saved);
+      document.getElementById('readingContent').scrollTop = data.scrollTop;
+      document.getElementById('bookmarkBanner').style.display = 'none';
+    }
+
+    // --- Progresso di lettura audio (ripresa TTS) ---
+    function getProgressKey(bookId) {
+      return `tts_progress_${bookId}`;
+    }
+
+    function saveProgress(bookId, index) {
+      if (!bookId) return;
+      localStorage.setItem(getProgressKey(bookId), String(index));
+    }
+
+    // --- Libreria libri recenti ---
+    function getLibrary() {
+      return JSON.parse(localStorage.getItem('tts_library') || '[]');
+    }
+
+    function updateLibrary(bookId, title, progress) {
+      if (!bookId) return;
+      let lib = getLibrary();
+      const idx = lib.findIndex(b => b.bookId === bookId);
+      const entry = { bookId, title: title || 'Senza titolo', progress: progress || 0, lastOpened: Date.now() };
+      if (idx >= 0) lib[idx] = { ...lib[idx], ...entry };
+      else lib.unshift(entry);
+      lib = lib.sort((a, b) => b.lastOpened - a.lastOpened).slice(0, 10);
+      localStorage.setItem('tts_library', JSON.stringify(lib));
+      renderLibrary();
+    }
+
+    function removeLibraryEntry(bookId) {
+      let lib = getLibrary().filter(b => b.bookId !== bookId);
+      localStorage.setItem('tts_library', JSON.stringify(lib));
+      localStorage.removeItem(`tts_progress_${bookId}`);
+      localStorage.removeItem(`tts_bookmark_${bookId}`);
+      renderLibrary();
+    }
+
+    function renderLibrary() {
+      const lib = getLibrary();
+      const container = document.getElementById('libraryContainer');
+      const list = document.getElementById('libraryList');
+      if (lib.length === 0) {
+        container.style.display = 'none';
+        return;
+      }
+      container.style.display = 'block';
+      list.innerHTML = lib.map(b => `
+        <div class="library-item">
+          <span>${escapeHtml(b.title)} — ${b.progress}%</span>
+          <button onclick="removeLibraryEntry('${b.bookId}')">🗑</button>
+        </div>
+      `).join('');
+    }
+
+    // --- Caricamento ePub con capitoli ---
+    async function loadEpub(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const textInput = document.getElementById('textInput');
+      document.getElementById('fileName').innerText = "File caricato: " + file.name;
+
+      showStatus("Estrazione testo dal libro in corso...", false);
+      textInput.value = "";
+
+      try {
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+          const book = ePub(e.target.result);
+          await book.ready;
+
+          const chapters = [];
+          let chapterNum = 0;
+          const spine = book.spine;
+
+          for (const item of spine.spineItems) {
+            const doc = await item.load(book.load.bind(book));
+            const text = doc.textContent || (doc.body && doc.body.innerText) || "";
+            if (text.trim()) {
+              chapterNum++;
+              chapters.push({ label: `Capitolo ${chapterNum}`, text: text.trim() });
+            }
+          }
+
+          const fullText = chapters.map(c => c.text).join("\n\n");
+          textInput.value = fullText;
+          showStatus("ePub caricato con successo! Premi 'Leggi Testo'.", false);
+
+          const title = file.name.replace(/\.epub$/i, '');
+          renderReadingView(fullText, chapters, title);
+        };
+        reader.readAsArrayBuffer(file);
+      } catch (err) {
+        showStatus("Errore ePub: " + err.message, true);
+      }
+    }
+
+    function chunkText(text, maxLength = 800) {
+      const sentences = text.match(/[^.!?]+[.!?]+|\s*$/g) || [text];
+      const chunks = [];
+      let currentChunk = "";
+
+      for (const sentence of sentences) {
+        if ((currentChunk + sentence).length <= maxLength) {
+          currentChunk += sentence;
+        } else {
+          if (currentChunk.trim()) chunks.push(currentChunk.trim());
+          currentChunk = sentence;
+        }
+      }
+      if (currentChunk.trim()) chunks.push(currentChunk.trim());
+      return chunks;
+    }
+
+    function getActiveCloudVoice(engine) {
+      return document.getElementById('voiceSelect').value;
+    }
+
+    async function fetchCloudAudio(text, engine, voice, rate) {
+      const targetUrl = engine === 'edge' ? WORKER_URL_EDGE : WORKER_URL;
+      const cleanUrl = targetUrl.replace(/\/$/, "");
+      const response = await fetch(cleanUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain",
+          "X-Voice": voice,
+          "X-Rate": rate,
+          "X-App-Token": APP_TOKEN
+        },
+        body: text
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errText}`);
+      }
+
+      const blob = await response.blob();
+      return { url: URL.createObjectURL(blob), blob };
+    }
+
+    async function processAndPlay() {
+      const text = document.getElementById('textInput').value;
+      const engine = document.getElementById('engineSelect').value;
+      const voice = getActiveCloudVoice(engine);
+      const rate = document.getElementById('rateSelect').value;
+      const playBtn = document.getElementById('playBtn');
+
+      if (!text.trim()) {
+        showStatus("Inserisci o carica un testo!", true);
+        return;
+      }
+
+      if (engine === 'browser' && !('speechSynthesis' in window)) {
+        showStatus("Il tuo browser non supporta la sintesi vocale integrata.", true);
+        return;
+      }
+
+      ensureReadingView(text);
+      chunkBlobs = new Array(currentChunks.length);
+      prefetchCache = {};
+
+      currentIndex = 0;
+      const savedIndex = parseInt(localStorage.getItem(getProgressKey(currentBookId)) || "0", 10);
+      if (savedIndex > 0 && savedIndex < currentChunks.length) {
+        const resume = confirm(`Hai un progresso di lettura salvato (parte ${savedIndex + 1} di ${currentChunks.length}). Vuoi riprendere da lì?`);
+        if (resume) currentIndex = savedIndex;
+      }
+
+      // Ferma sempre qualsiasi lettura precedente (audio o voce browser) prima di iniziare quella nuova
+      const audioPlayerEl = document.getElementById('audioPlayer');
+      audioPlayerEl.pause();
+      if (currentPlaybackAbort) { currentPlaybackAbort(); }
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
+
+      playbackToken++;
+      const myToken = playbackToken;
+      isPaused = false;
+      softPauseRequested = false;
+      activeEngine = engine;
+      activeVoice = voice;
+      activeRate = rate;
+      updatePauseButtonLabel();
+
+      playBtn.disabled = true;
+      showStatus("Generazione audio in corso...", false);
+
+      await playFrom(myToken, voice, rate, engine);
+    }
+
+    async function playFrom(myToken, voice, rate, engine) {
+      const playBtn = document.getElementById('playBtn');
+      const audioPlayer = document.getElementById('audioPlayer');
+
+      while (currentIndex < currentChunks.length) {
+        if (myToken !== playbackToken) return;
+
+        showProgress(`Parte ${currentIndex + 1} di ${currentChunks.length}`);
+        highlightChunk(currentIndex);
+
+        try {
+          if (engine === 'browser') {
+            const voiceObj = getSelectedBrowserVoice();
+            const rateMultiplier = rateToMultiplier(rate);
+            showStatus("Riproduzione (voce browser) avviata!", false);
+            const completedNaturally = await speakChunkBrowser(currentChunks[currentIndex], voiceObj, rateMultiplier);
+            if (myToken !== playbackToken) return;
+            if (!completedNaturally) {
+              // Interrotto da pausa: resta su questo chunk, il ciclo riparte da qui alla ripresa
+              playBtn.disabled = false;
+              return;
+            }
+          } else {
+            let result;
+            if (prefetchCache[currentIndex]) {
+              result = await prefetchCache[currentIndex];
+              delete prefetchCache[currentIndex];
+            } else {
+              result = await fetchCloudAudio(currentChunks[currentIndex], engine, voice, rate);
+            }
+            if (myToken !== playbackToken) return;
+
+            chunkBlobs[currentIndex] = result.blob;
+            if (engine === 'azure') addUsedCharacters(currentChunks[currentIndex].length, engine);
+            audioPlayer.src = result.url;
+            showStatus("Riproduzione avviata!", false);
+
+            // Prefetch del prossimo chunk mentre riproduciamo quello corrente
+            const nextIndex = currentIndex + 1;
+            if (nextIndex < currentChunks.length && !prefetchCache[nextIndex]) {
+              prefetchCache[nextIndex] = fetchCloudAudio(currentChunks[nextIndex], engine, voice, rate)
+                .catch(e => { delete prefetchCache[nextIndex]; throw e; });
+            }
+
+            await new Promise((resolve, reject) => {
+              audioPlayer.onended = () => { currentPlaybackAbort = null; resolve(); };
+              audioPlayer.onerror = () => { currentPlaybackAbort = null; reject(new Error("Errore riproduzione audio")); };
+              currentPlaybackAbort = () => { currentPlaybackAbort = null; resolve(); };
+              audioPlayer.play().catch(err => {
+                if (myToken !== playbackToken) { resolve(); return; } // interrotto volontariamente, non è un vero errore
+                reject(err);
+              });
+            });
+
+            if (myToken !== playbackToken) return;
+          }
+
+          currentIndex++;
+          saveProgress(currentBookId, currentIndex);
+          updateLibrary(currentBookId, currentBookTitle, Math.round(currentIndex / currentChunks.length * 100));
+        } catch (e) {
+          if (myToken === playbackToken) {
+            showStatus("Errore: " + e.message, true);
+          }
+          break;
+        }
+      }
+
+      if (myToken === playbackToken) {
+        if (currentIndex >= currentChunks.length) {
+          showStatus("Lettura completata!", false);
+          document.getElementById('progress').style.display = 'none';
+          localStorage.removeItem(getProgressKey(currentBookId));
+          updateLibrary(currentBookId, currentBookTitle, 100);
+          clearHighlight();
+        }
+        playBtn.disabled = false;
+      }
+    }
+
+    function togglePause() {
+      if (activeEngine === 'browser') {
+        if (!('speechSynthesis' in window)) return;
+        if (isPaused) {
+          // Riprendi: rilancia il ciclo dallo stesso chunk (la frase riparte da capo)
+          isPaused = false;
+          softPauseRequested = false;
+          updatePauseButtonLabel();
+          showStatus("Lettura ripresa (voce browser)...", false);
+          document.getElementById('playBtn').disabled = true;
+          playFrom(playbackToken, activeVoice, activeRate, activeEngine);
+        } else {
+          softPauseRequested = true;
+          isPaused = true;
+          speechSynthesis.cancel();
+          updatePauseButtonLabel();
+          showStatus("In pausa.", false);
+        }
+      } else {
+        const audioPlayer = document.getElementById('audioPlayer');
+        if (isPaused) { audioPlayer.play(); isPaused = false; }
+        else { audioPlayer.pause(); isPaused = true; }
+        updatePauseButtonLabel();
+      }
+    }
+
+    function updatePauseButtonLabel() {
+      const btn = document.getElementById('pauseBtn');
+      if (btn) btn.innerText = isPaused ? '▶️ Riprendi' : '⏸ Pausa';
+    }
+
+    function stopPlayback() {
+      playbackToken++;
+      const audioPlayer = document.getElementById('audioPlayer');
+      audioPlayer.pause();
+      if (currentPlaybackAbort) { currentPlaybackAbort(); }
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
+      isPaused = false;
+      softPauseRequested = false;
+      updatePauseButtonLabel();
+      clearHighlight();
+      document.getElementById('playBtn').disabled = false;
+      showStatus("Riproduzione interrotta.", false);
+    }
+
+    function downloadMp3() {
+      if (document.getElementById('engineSelect').value === 'browser') {
+        showStatus("Il download MP3 funziona solo con la voce Azure, non con quella del browser.", true);
+        return;
+      }
+      const collected = chunkBlobs.filter(Boolean);
+      if (collected.length === 0) {
+        showStatus("Nessun audio generato ancora da scaricare. Avvia la lettura prima.", true);
+        return;
+      }
+      const combined = new Blob(collected, { type: 'audio/mpeg' });
+      const url = URL.createObjectURL(combined);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (currentBookTitle || 'lettura').replace(/[^\w\-]+/g, '_') + '.mp3';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      showStatus("Download MP3 avviato (solo le parti già generate).", false);
+    }
+
+    renderUsageCounter();
+    renderLibrary();
+    applySavedTtsPrefs();
+  </script>
+</body>
+</html>

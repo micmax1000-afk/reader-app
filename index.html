@@ -105,7 +105,6 @@
     <button id="genReadingBtn" onclick="startReadingFromTextarea()" style="background:#0066cc; display:none;">📖 Vista lettura</button>
     <select id="engineSelect" onchange="onEngineChange(); saveTtsPrefs();">
       <option value="azure">Voce Azure (neurale, a consumo)</option>
-      <option value="edge">Voce Edge TTS (gratis, non ufficiale)</option>
       <option value="browser">Voce del browser (gratis, illimitata)</option>
     </select>
     <select id="voiceSelect" onchange="saveTtsPrefs()">
@@ -115,9 +114,6 @@
     </select>
     <select id="browserVoiceSelect" onchange="saveTtsPrefs()" style="display:none;"></select>
     <button id="reloadVoicesBtn" onclick="forceReloadVoices()" style="display:none; background:#6c757d;">🔄 Ricarica voci</button>
-    <div id="edgeInfoNote" style="display:none; font-size:12px; color:#7a5b00; background:#fff3cd; border:1px solid #ffe08a; border-radius:6px; padding:8px 10px; line-height:1.4;">
-      ⚠️ Servizio non ufficiale (stesse voci di Azure, ma senza chiave API). Gratis e senza limiti noti, ma Microsoft potrebbe modificarlo o bloccarlo senza preavviso in qualsiasi momento. Se smette di funzionare, passa su Azure o sulla voce del browser.
-    </div>
     <div id="voiceInfoNote" style="display:none; font-size:12px; color:#666; background:#f0f4f8; border:1px solid #dde5ec; border-radius:6px; padding:8px 10px; line-height:1.4;">
       ℹ️ Le voci gratuite arrivano dal motore di sintesi vocale installato sul tuo telefono (di solito "Servizi vocali Google"), non dal browser stesso — per questo variano da dispositivo a dispositivo. Per più scelta: <b>Impostazioni → Lingue e immissione → Uscita sintesi vocale</b>, controlla i dati vocali installati o prova un altro motore TTS dal Play Store.
     </div>
@@ -139,7 +135,6 @@
 
   <script>
     const WORKER_URL = "https://azure-tts-proxy.mic-max-1000.workers.dev";
-    const WORKER_URL_EDGE = "https://edge-tts-proxy.mic-max-1000.workers.dev";
 
     let currentChunks = [];
     let currentIndex = 0;
@@ -315,11 +310,10 @@
     // --- Motore Web Speech (gratis, illimitato, voci del dispositivo) ---
     function onEngineChange() {
       const engine = document.getElementById('engineSelect').value;
-      document.getElementById('voiceSelect').style.display = (engine === 'azure' || engine === 'edge') ? 'block' : 'none';
+      document.getElementById('voiceSelect').style.display = engine === 'azure' ? 'block' : 'none';
       document.getElementById('browserVoiceSelect').style.display = engine === 'browser' ? 'block' : 'none';
       document.getElementById('reloadVoicesBtn').style.display = engine === 'browser' ? 'block' : 'none';
       document.getElementById('voiceInfoNote').style.display = engine === 'browser' ? 'block' : 'none';
-      document.getElementById('edgeInfoNote').style.display = engine === 'edge' ? 'block' : 'none';
       if (engine === 'browser') populateBrowserVoices();
     }
 
@@ -796,8 +790,7 @@
     }
 
     async function fetchCloudAudio(text, engine, voice, rate) {
-      const targetUrl = engine === 'edge' ? WORKER_URL_EDGE : WORKER_URL;
-      const cleanUrl = targetUrl.replace(/\/$/, "");
+      const cleanUrl = WORKER_URL.replace(/\/$/, "");
       const response = await fetch(cleanUrl, {
         method: "POST",
         headers: {

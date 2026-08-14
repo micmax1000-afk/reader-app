@@ -25,11 +25,19 @@
     #progress { margin-top: 6px; font-size: 13px; text-align: center; color: #555; display: none; }
     audio { width: 100%; margin-top: 15px; }
 
-    #libraryContainer { display: none; margin-bottom: 15px; background: #fff; border-radius: 8px; padding: 12px; border: 1px solid #ddd; }
-    #libraryContainer .library-title { font-weight: bold; margin-bottom: 6px; font-size: 14px; }
-    .library-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 13px; }
-    .library-item:last-child { border-bottom: none; }
-    .library-item button { width: auto; padding: 4px 8px; font-size: 11px; background: #d9534f; }
+    #libraryScreen { margin-bottom: 15px; }
+    .library-search { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #ccc; margin-bottom: 12px; font-size: 15px; box-sizing: border-box; background: #fff; }
+    .library-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 15px; }
+    .library-card { cursor: pointer; }
+    .library-cover-wrap { position: relative; }
+    .library-cover { width: 100%; aspect-ratio: 2/3; background: linear-gradient(135deg, #dfe6ee, #c9d4e0); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
+    .library-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .library-cover .placeholder-icon { font-size: 32px; }
+    .library-progress-badge { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.65); color: #fff; font-size: 10px; padding: 2px 5px; border-radius: 4px; font-weight: bold; }
+    .library-delete-btn { position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.55); color: #fff; border: none; border-radius: 50%; width: 22px; height: 22px; font-size: 12px; line-height: 1; cursor: pointer; padding: 0; }
+    .library-card-title { font-size: 12px; margin-top: 5px; color: #333; line-height: 1.25; max-height: 2.5em; overflow: hidden; text-align: center; }
+    .library-add-tile { aspect-ratio: 2/3; border: 2px dashed #aab8c9; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 30px; color: #aab8c9; cursor: pointer; background: #f9fbfd; }
+    #libraryEmptyMsg { text-align: center; color: #888; font-size: 13px; padding: 10px 0; display: none; }
 
     .reading-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
     .reading-toolbar button { flex: 0 0 auto; padding: 8px 10px; font-size: 13px; width: auto; }
@@ -59,18 +67,23 @@
       📁 Carica un libro (.ePub)
     </label>
     <input type="file" id="filePicker" accept=".epub" onchange="loadEpub(event)">
-    <div id="fileName" style="font-size: 12px; margin-top: 5px; color: #666;">Oppure incolla direttamente il testo sotto</div>
+    <div id="fileName" style="font-size: 12px; margin-top: 5px; color: #666;"></div>
+    <div style="font-size: 12px; margin-top: 5px; color: #666;">
+      oppure <a href="#" onclick="togglePasteText(event)" id="pasteTextLink">incolla testo</a>
+    </div>
   </div>
 
-  <div id="libraryContainer">
-    <div class="library-title">📚 Libri recenti</div>
-    <div id="libraryList"></div>
+  <div id="libraryScreen">
+    <input type="text" id="librarySearch" class="library-search" placeholder="🔍 Cerca nei tuoi libri..." oninput="renderLibraryGrid()">
+    <div id="libraryGrid" class="library-grid"></div>
+    <div id="libraryEmptyMsg">Nessun libro trovato.</div>
   </div>
 
-  <textarea id="textInput" placeholder="Incolla qui il testo o carica un file .ePub..."></textarea>
+  <textarea id="textInput" placeholder="Incolla qui il testo..." style="display:none;"></textarea>
 
   <div id="readingView">
     <div class="reading-toolbar">
+      <button onclick="backToLibrary()">📚 Libreria</button>
       <button onclick="saveBookmark(false)">🔖 Segna pagina</button>
       <button onclick="showTextEditor()">✏️ Modifica testo</button>
     </div>
@@ -89,7 +102,7 @@
   </div>
 
   <div class="controls">
-    <button id="genReadingBtn" onclick="startReadingFromTextarea()" style="background:#0066cc;">📖 Vista lettura</button>
+    <button id="genReadingBtn" onclick="startReadingFromTextarea()" style="background:#0066cc; display:none;">📖 Vista lettura</button>
     <select id="engineSelect" onchange="onEngineChange(); saveTtsPrefs();">
       <option value="azure">Voce Azure (neurale, a consumo)</option>
       <option value="browser">Voce del browser (gratis, illimitata)</option>
@@ -211,6 +224,89 @@
       return simpleHash(text.slice(0, 300) + "|" + text.length);
     }
 
+    // --- Storage persistente libri (IndexedDB) ---
+    const DB_NAME = 'tts_reader_db';
+    const DB_VERSION = 1;
+    const STORE_NAME = 'books';
+
+    function openBooksDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME, { keyPath: 'bookId' });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function saveBookRecord(record) {
+      const db = await openBooksDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).put(record);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function getBookRecord(bookId) {
+      const db = await openBooksDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const req = tx.objectStore(STORE_NAME).get(bookId);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function getAllBookRecords() {
+      const db = await openBooksDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const req = tx.objectStore(STORE_NAME).getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function deleteBookRecord(bookId) {
+      const db = await openBooksDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).delete(bookId);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    // Ridimensiona un'immagine (via canvas) e la converte in data URL compatta, per non appesantire il DB
+    function blobUrlToResizedDataUrl(blobUrl, maxWidth) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, maxWidth / img.width);
+          const w = Math.max(1, Math.round(img.width * scale));
+          const h = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          try {
+            resolve(canvas.toDataURL('image/jpeg', 0.75));
+          } catch (e) {
+            reject(e);
+          }
+        };
+        img.onerror = reject;
+        img.src = blobUrl;
+      });
+    }
+
     // --- Motore Web Speech (gratis, illimitato, voci del dispositivo) ---
     function onEngineChange() {
       const engine = document.getElementById('engineSelect').value;
@@ -309,120 +405,4 @@
         utter.rate = rateMultiplier;
         utter.onend = () => resolve(!softPauseRequested);
         utter.onerror = (e) => {
-          if (softPauseRequested) { resolve(false); return; }
-          reject(new Error("Errore voce browser: " + (e.error || 'sconosciuto')));
-        };
-        speechSynthesis.speak(utter);
-      });
-    }
-
-    if ('speechSynthesis' in window) {
-      speechSynthesis.onvoiceschanged = populateBrowserVoices;
-      populateBrowserVoices();
-    }
-
-    function escapeHtml(str) {
-      const div = document.createElement('div');
-      div.textContent = str;
-      return div.innerHTML;
-    }
-
-    function applyReadingPrefs() {
-      const content = document.getElementById('readingContent');
-      content.style.fontSize = readingPrefs.fontSize + 'px';
-      if (readingPrefs.night) {
-        content.style.background = '#1b1b1b';
-        content.style.color = '#e0e0e0';
-        content.style.borderColor = '#333';
-      } else {
-        content.style.background = '#fffdf7';
-        content.style.color = '#333';
-        content.style.borderColor = '#e0d9c5';
-      }
-    }
-
-    function changeFontSize(delta) {
-      readingPrefs.fontSize = Math.min(28, Math.max(14, readingPrefs.fontSize + delta));
-      localStorage.setItem('tts_reading_prefs', JSON.stringify(readingPrefs));
-      applyReadingPrefs();
-    }
-
-    function toggleNightMode() {
-      readingPrefs.night = !readingPrefs.night;
-      localStorage.setItem('tts_reading_prefs', JSON.stringify(readingPrefs));
-      applyReadingPrefs();
-    }
-
-    function startReadingFromTextarea() {
-      const text = document.getElementById('textInput').value;
-      const title = text.trim().slice(0, 40) || 'Testo senza titolo';
-      renderReadingView(text, null, title);
-    }
-
-    function buildAndRenderChunks(text, chapters) {
-      const navContainer = document.getElementById('chapterNav');
-      const content = document.getElementById('readingContent');
-      const chunks = [];
-
-      function renderBlock(blockText) {
-        const paragraphs = blockText.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-        return paragraphs.map(p => {
-          const pChunks = chunkText(p);
-          const spans = pChunks.map(chunk => {
-            const globalIndex = chunks.length;
-            chunks.push(chunk);
-            return `<span class="tts-chunk" id="chunk-${globalIndex}">${escapeHtml(chunk)} </span>`;
-          }).join('');
-          return `<p>${spans}</p>`;
-        }).join('');
-      }
-
-      let html;
-      if (chapters && chapters.length > 1) {
-        navContainer.style.display = 'flex';
-        navContainer.innerHTML = chapters.map((c, i) => `<button onclick="scrollToChapter(${i})">${escapeHtml(c.label)}</button>`).join('');
-        html = chapters.map((c, ci) => `<div id="chapter-${ci}"><h3>${escapeHtml(c.label)}</h3>${renderBlock(c.text)}</div>`).join('');
-      } else {
-        navContainer.style.display = 'none';
-        navContainer.innerHTML = '';
-        html = renderBlock(text);
-      }
-
-      content.innerHTML = html;
-      return chunks;
-    }
-
-    function renderReadingView(text, chapters, title) {
-      if (!text || !text.trim()) {
-        showStatus("Inserisci o carica un testo prima!", true);
-        return;
-      }
-
-      currentChunks = buildAndRenderChunks(text, chapters);
-      currentBookId = getBookId(text);
-      currentBookTitle = title || 'Senza titolo';
-      lastChapters = chapters || null;
-
-      document.getElementById('textInput').style.display = 'none';
-      document.getElementById('readingView').style.display = 'block';
-      document.getElementById('genReadingBtn').style.display = 'none';
-
-      applyReadingPrefs();
-      checkBookmark();
-
-      const savedIndex = parseInt(localStorage.getItem(getProgressKey(currentBookId)) || "0", 10);
-      const progressPercent = currentChunks.length ? Math.round(savedIndex / currentChunks.length * 100) : 0;
-      updateLibrary(currentBookId, currentBookTitle, progressPercent);
-
-      const content = document.getElementById('readingContent');
-      content.onscroll = () => {
-        clearTimeout(autoSaveTimer);
-        autoSaveTimer = setTimeout(() => saveBookmark(true), 800);
-      };
-    }
-
-    function ensureReadingView(text) {
-      const candidateId = getBookId(text);
-      const readingHidden = document.getElementById('readingView').style.display !== 'block';
-      if (currentBookId !== candidateId || !currentChunks.length || readingHidden) {
-        const title = (currentBookId === candidateId && currentBookTitle) ? currentBookTitle : (text.trim().slice(0, 40) || 'Testo senza titolo'
+  

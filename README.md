@@ -1,97 +1,58 @@
-# 📖 EPUB Reader
+BACKUP PROGETTO "Lettore TTS Neural & ePub"
+Generato il: 2026-08-09
 
-Web app leggera e open source per leggere file **EPUB** direttamente nel browser.  
-Nessun server, nessuna registrazione, privacy totale.
+=== COSA CONTIENE QUESTO BACKUP ===
 
-**Demo live** (dopo il deploy su GitHub Pages):  
-`https://TUO-USERNAME.github.io/epub-reader/`
+index.html              -> l'app (va caricato su GitHub Pages, repo "reader-app",
+                            deve chiamarsi index.html)
+manifest.json            -> manifest PWA (stessa cartella di index.html)
+icon-*.png                -> icone dell'app (stessa cartella di index.html)
+azure-tts-worker.js       -> codice del Cloudflare Worker "azure-tts-proxy"
+google-tts-worker.js      -> codice del Cloudflare Worker "google-tts-proxy"
+assetlinks.json           -> va caricato su un repository DIVERSO, quello
+                            "micmax1000-afk.github.io" (root del dominio),
+                            dentro la cartella .well-known/
 
----
+=== DOVE CARICARE COSA ===
 
-## ✨ Funzionalità
+Repository "reader-app" (GitHub Pages):
+  - index.html
+  - manifest.json
+  - icon-16.png, icon-32.png, icon-180.png, icon-192.png,
+    icon-512.png, icon-maskable-512.png
 
-- Caricamento file `.epub` (pulsante o drag & drop)
-- Sommario (TOC) navigabile
-- Navigazione a pagine (click, frecce, swipe)
-- Controllo dimensione del testo
-- Tema chiaro / scuro
-- Salvataggio automatico della posizione di lettura (localStorage)
-- Responsive (funziona bene su desktop e mobile)
-- Completamente client-side (usa [epub.js](https://github.com/futurepress/epub.js))
+Repository "micmax1000-afk.github.io" (root del dominio):
+  - .well-known/assetlinks.json
 
----
+Cloudflare Workers (incollare nell'editor codice di ciascun Worker):
+  - Worker "azure-tts-proxy"  <- azure-tts-worker.js
+  - Worker "google-tts-proxy" <- google-tts-worker.js
 
-## 🚀 Pubblicare su GitHub Pages
+=== VARIABILI/SECRET DA IMPOSTARE SUI WORKER ===
+(da re-inserire manualmente, Cloudflare non permette di esportarle)
 
-1. Crea un nuovo repository su GitHub (es. `epub-reader`)
-2. Carica tutti i file di questa cartella:
-   ```
-   index.html
-   css/style.css
-   js/app.js
-   README.md
-   ```
-3. Vai su **Settings → Pages**
-4. Seleziona branch `main` (o `master`) e cartella `/ (root)`
-5. Salva. Tra qualche minuto l’app sarà online all’indirizzo:
-   ```
-   https://TUO-USERNAME.github.io/epub-reader/
-   ```
+Worker azure-tts-proxy:
+  - AZURE_SPEECH_KEY    (Secret)
+  - AZURE_SPEECH_REGION = italynorth
+  - APP_SECRET          (Secret) = deve combaciare con APP_TOKEN dentro index.html
 
-### Metodo rapido con Git
+Worker google-tts-proxy:
+  - GOOGLE_TTS_API_KEY  (Secret)
+  - APP_SECRET          (Secret) = stesso valore di sopra
 
-```bash
-git init
-git add .
-git commit -m "Primo commit: EPUB Reader"
-git branch -M main
-git remote add origin https://github.com/TUO-USERNAME/epub-reader.git
-git push -u origin main
-```
+Il token APP_TOKEN è già scritto dentro index.html (variabile APP_TOKEN in cima
+allo script) - se lo perdi, aprilo e cercalo lì.
 
-Poi attiva GitHub Pages come descritto sopra.
+=== CHIAVE DI FIRMA ANDROID (APK) ===
+NON inclusa in questo backup per motivi di sicurezza - il file signing.keystore
+e le sue credenziali (password: FFuLgMrQWVqu, alias: my-key-alias) li hai
+ricevuti separatamente da PWABuilder quando hai generato il pacchetto.
+CONSERVALI TU IN UN POSTO SICURO: senza quel file non puoi più aggiornare
+la stessa identica app Android in futuro (dovresti reinstallarla da zero
+con una firma diversa, perdendo il collegamento con assetlinks.json attuale).
 
----
-
-## 🖥️ Uso locale
-
-Apri semplicemente `index.html` con un server locale (necessario per alcune funzionalità dei browser):
-
-```bash
-# Python
-python -m http.server 8000
-
-# oppure Node
-npx serve .
-```
-
-Poi vai su `http://localhost:8000`
-
----
-
-## ⌨️ Scorciatoie da tastiera
-
-| Tasto          | Azione                  |
-|----------------|-------------------------|
-| ← / →          | Pagina precedente / successiva |
-| + / −          | Ingrandisci / riduci testo |
-| T              | Cambia tema             |
-| Esc            | Chiudi sommario         |
-
----
-
-## 🛠️ Tecnologie
-
-- [epub.js](https://github.com/futurepress/epub.js) – rendering EPUB
-- [JSZip](https://stuk.github.io/jszip/) – gestione archivi
-- HTML / CSS / JavaScript vanilla (zero framework)
-
----
-
-## 📄 Licenza
-
-MIT – usa, modifica e distribuisci liberamente.
-
----
-
-Fatto con ❤️ per chi ama leggere.
+=== URL DEL PROGETTO ===
+App:              https://micmax1000-afk.github.io/reader-app/
+Worker Azure:      https://azure-tts-proxy.mic-max-1000.workers.dev
+Worker Google:     https://google-tts-proxy.mic-max-1000.workers.dev
+Package Android:   readertts.micmax1000_afk.twa
